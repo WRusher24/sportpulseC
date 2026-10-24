@@ -101,3 +101,29 @@ test("provider sync replaces opening tables", async () => {
   await repo.markLeagueSynced("il-premier");
   assert.ok(await repo.getLeagueSyncedAt("il-premier"));
 });
+
+test("every repository read used by the pages works on Postgres", async () => {
+  const { db, repo } = await setup();
+  await seedDatabase(db);
+  assert.equal(await repo.lastIngestAt(), null);
+  await repo.logIngestRun({ startedAt: new Date(), fetched: 1, inserted: 0, report: { ok: true } });
+  assert.ok((await repo.lastIngestAt()) instanceof Date);
+  const now = Date.now();
+  await repo.upsertMatches([
+    { id: "a", leagueId: "epl", homeTeamId: "arsenal", awayTeamId: "chelsea", homeScore: 1, awayScore: 0, status: "second_half", minute: 60, matchTimestamp: new Date(now - 3600_000).toISOString(), venue: null, round: "1", stats: null, lineUps: null, externalId: "x1", isDemo: false },
+    { id: "b", leagueId: "epl", homeTeamId: "liverpool", awayTeamId: "arsenal", homeScore: null, awayScore: null, status: "scheduled", minute: null, matchTimestamp: new Date(now + 86400_000).toISOString(), venue: null, round: "2", stats: null, lineUps: null, externalId: null, isDemo: false }
+  ]);
+  assert.equal((await repo.listMatches({})).length, 2);
+  assert.equal((await repo.listMatches({ teamId: "arsenal", status: ["scheduled"], from: new Date(now - 3 * 3600_000), order: "asc", limit: 4 })).length, 1);
+  assert.equal((await repo.listMatches({ status: ["first_half", "half_time", "second_half", "extra_time"] })).length, 1);
+  assert.equal((await repo.listMatches({ leagueId: "epl", from: new Date(now - 5 * 86400_000), to: new Date(now + 7 * 86400_000) })).length, 2);
+  assert.equal((await repo.listMatches({ teamId: "arsenal", status: ["finished"], order: "desc", limit: 5 })).length, 0);
+  assert.equal(await repo.getMatch("missing"), null);
+  assert.equal((await repo.getTeam("arsenal"))?.nameHe, "ארסנל");
+  assert.deepEqual(await repo.listThreads({ limit: 5, teamId: "arsenal" }), []);
+  assert.equal(await repo.getThread("00000000-0000-0000-0000-000000000000"), null);
+  assert.equal(await repo.getDigest("arsenal", "2026-01-01"), null);
+  assert.deepEqual(await repo.voteCounts("00000000-0000-0000-0000-000000000000"), { optimistic: 0, worried: 0 });
+  assert.deepEqual(await repo.ratingSummary("a"), []);
+  assert.equal((await repo.getStandings("nba")).length, 30);
+});
