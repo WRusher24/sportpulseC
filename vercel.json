@@ -3,7 +3,7 @@
   "framework": "nextjs",
   "buildCommand": "npm run vercel-build",
   "crons": [
-    { "path": "/api/cron/ingest", "schedule": "*/5 * * * *" },
+    { "path": "/api/cron/ingest", "schedule": "0 0 * * *" },
     { "path": "/api/cron/digest?slot=summer", "schedule": "0 4 * * *" },
     { "path": "/api/cron/digest?slot=winter", "schedule": "0 5 * * *" }
   ],
