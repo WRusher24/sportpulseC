@@ -1,0 +1,155 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ------------------------------------------------------------------ themes (RGB channels so Tailwind alpha utilities work) */
+:root,
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --c-bg: 15 23 42; /* #0f172a deep slate */
+  --c-surface: 30 41 59;
+  --c-surface2: 51 65 85;
+  --c-line: 71 85 105;
+  --c-fg: 255 255 255;
+  --c-muted: 148 163 184;
+  --c-accent: 34 197 94; /* #22c55e neon green */
+  --c-accent-fg: 3 7 18;
+  --c-live: 34 197 94;
+  --c-hot: 250 204 21;
+  --c-good: 74 222 128;
+  --c-bad: 248 113 113;
+}
+
+:root[data-theme="light"] {
+  color-scheme: light;
+  --c-bg: 255 255 255; /* #ffffff */
+  --c-surface: 241 245 249;
+  --c-surface2: 226 232 240;
+  --c-line: 203 213 225;
+  --c-fg: 30 41 59; /* #1e293b charcoal */
+  --c-muted: 71 85 105;
+  --c-accent: 29 78 216; /* crisp sports blue */
+  --c-accent-fg: 255 255 255;
+  --c-live: 220 38 38;
+  --c-hot: 180 83 9;
+  --c-good: 21 128 61;
+  --c-bad: 185 28 28;
+}
+
+:root[data-theme="pitch"] {
+  color-scheme: dark;
+  --c-bg: 5 28 20; /* #051c14 pitch */
+  --c-surface: 9 44 32;
+  --c-surface2: 14 62 45;
+  --c-line: 31 98 73;
+  --c-fg: 236 253 245;
+  --c-muted: 153 205 180;
+  --c-accent: 34 211 238; /* electric cyan */
+  --c-accent-fg: 3 20 28;
+  --c-live: 250 240 50; /* neon yellow */
+  --c-hot: 253 224 71;
+  --c-good: 74 222 128;
+  --c-bad: 252 165 165;
+}
+
+:root[data-theme="night"] {
+  color-scheme: dark;
+  --c-bg: 0 0 0; /* midnight black */
+  --c-surface: 17 17 17;
+  --c-surface2: 38 38 38;
+  --c-line: 82 82 82;
+  --c-fg: 255 255 255;
+  --c-muted: 212 212 212;
+  --c-accent: 249 115 22; /* #f97316 */
+  --c-accent-fg: 0 0 0;
+  --c-live: 249 115 22;
+  --c-hot: 251 191 36; /* amber breaking-news */
+  --c-good: 74 222 128;
+  --c-bad: 248 113 113;
+}
+
+@layer base {
+  html {
+    background: rgb(var(--c-bg));
+    -webkit-text-size-adjust: 100%;
+    scroll-behavior: smooth;
+  }
+  body {
+    @apply bg-bg text-fg font-sans antialiased;
+    font-family: "Heebo", "Assistant", "Rubik", system-ui, -apple-system, "Segoe UI", "Noto Sans Hebrew", Arial, sans-serif;
+    /* Western lining numerals everywhere, aligned in tables and scoreboards. */
+    font-variant-numeric: lining-nums tabular-nums;
+    font-feature-settings: "lnum" 1, "tnum" 1;
+    transition: background-color 0.3s ease, color 0.3s ease;
+  }
+  ::selection {
+    background: rgb(var(--c-accent) / 0.35);
+  }
+  :focus-visible {
+    outline: 2px solid rgb(var(--c-accent));
+    outline-offset: 2px;
+    border-radius: 6px;
+  }
+  /* Mixed Hebrew / English input: let the browser pick direction per field while staying right-aligned by default. */
+  input[type="text"],
+  input[type="search"],
+  input[type="email"],
+  input[type="password"],
+  textarea {
+    unicode-bidi: plaintext;
+    text-align: start;
+  }
+  input[dir="ltr"] {
+    unicode-bidi: normal;
+  }
+}
+
+@layer components {
+  .card {
+    @apply rounded-2xl border border-line/60 bg-surface p-4;
+  }
+  .btn {
+    @apply inline-flex min-h-[44px] items-center justify-center gap-2 rounded-xl px-4 text-sm font-semibold transition active:scale-[0.98] disabled:opacity-50 disabled:active:scale-100;
+  }
+  .btn-primary {
+    @apply btn bg-accent text-accent-fg hover:brightness-110;
+  }
+  .btn-ghost {
+    @apply btn border border-line/70 bg-surface2/40 text-fg hover:bg-surface2;
+  }
+  .input {
+    @apply min-h-[44px] w-full rounded-xl border border-line/70 bg-bg px-3 text-sm text-fg placeholder:text-muted focus:border-accent;
+  }
+  .chip {
+    @apply inline-flex min-h-[36px] shrink-0 items-center rounded-full border border-line/60 px-3 text-sm text-muted transition;
+  }
+  .chip[aria-pressed="true"],
+  .chip[aria-selected="true"] {
+    @apply border-accent bg-accent text-accent-fg font-semibold;
+  }
+  .num {
+    direction: ltr;
+    unicode-bidi: isolate;
+    display: inline-block;
+  }
+  .prose-he {
+    @apply text-[1.0625rem] leading-8 text-fg/95;
+  }
+  .prose-he p + p {
+    @apply mt-4;
+  }
+  .scroll-x {
+    @apply flex gap-2 overflow-x-auto pb-1;
+    scrollbar-width: none;
+  }
+  .scroll-x::-webkit-scrollbar {
+    display: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    animation-duration: 0.001ms !important;
+    transition-duration: 0.001ms !important;
+  }
+}

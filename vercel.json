@@ -1,0 +1,15 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "framework": "nextjs",
+  "buildCommand": "npm run vercel-build",
+  "crons": [
+    { "path": "/api/cron/ingest", "schedule": "*/5 * * * *" },
+    { "path": "/api/cron/digest?slot=summer", "schedule": "0 4 * * *" },
+    { "path": "/api/cron/digest?slot=winter", "schedule": "0 5 * * *" }
+  ],
+  "functions": {
+    "app/api/cron/ingest/route.ts": { "maxDuration": 60 },
+    "app/api/cron/digest/route.ts": { "maxDuration": 60 },
+    "app/api/analyst/route.ts": { "maxDuration": 60 }
+  }
+}
