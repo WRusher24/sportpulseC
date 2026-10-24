@@ -2,7 +2,6 @@
 const nextConfig = {
   reactStrictMode: true,
   poweredByHeader: false,
-  serverExternalPackages: ["cheerio", "sanitize-html"],
   images: {
     // Article hero images come from many third-party CDNs; they are rendered with <img> (referrerPolicy=no-referrer).
     unoptimized: true

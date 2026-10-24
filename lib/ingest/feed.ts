@@ -1,5 +1,5 @@
 import { XMLParser } from "fast-xml-parser";
-import sanitizeHtml from "sanitize-html";
+import * as cheerio from "cheerio";
 import { fetchText } from "./http";
 import type { SourceConfig } from "./sources";
 
@@ -23,12 +23,13 @@ const text = (v: unknown): string => {
   return "";
 };
 
-/** Removes every tag/entity from feed-provided HTML. */
-export const stripHtml = (html: string): string =>
-  sanitizeHtml(html, { allowedTags: [], allowedAttributes: {} })
-    .replace(/&nbsp;/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
+/** Reduces feed-provided HTML to plain text: scripts/styles dropped, tags removed, entities decoded. */
+export const stripHtml = (html: string): string => {
+  if (!html) return "";
+  const $ = cheerio.load(`<div id="r">${html}</div>`);
+  $("script, style, noscript, iframe").remove();
+  return $("#r").text().replace(/\u00a0/g, " ").replace(/\s+/g, " ").trim();
+};
 
 function pickImage(item: Record<string, unknown>): string | null {
   const media = arr(item["media:content"] as Record<string, unknown> | Record<string, unknown>[] | undefined);
