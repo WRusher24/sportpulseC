@@ -31,8 +31,8 @@ The bottom bar has five tabs: **חדשות** (feed), **משחקים וטבלאו
 
 1. Sign in (**התחברות** → register with email, display name and password).
 2. After the final whistle open the match → **ציון האוהדים**.
-3. Tap a player, choose 1–10, optionally add a short note in Hebrew or English, then **שמירת דירוגים**.
-4. Fan averages (with vote counts) appear next to the media grade for each player, plus team averages.
+3. Tap a player, choose 1–10, optionally add a short note in Hebrew or English, then **שמירת דירוגים**. When official lineups are not available yet, add the player's name yourself (Hebrew or English) and rate them.
+4. Fan averages (with vote counts) appear next to the media grade for each player, plus team averages. A media grade is shown only when a source provides one; otherwise it shows "–".
 
 You can change your ratings later; each player keeps one rating per user per match.
 
@@ -42,6 +42,14 @@ You can change your ratings later; each player keeps one rating per user per mat
 * Answers use the stored standings, form, xG and match events, plus a Monte-Carlo season projection for scenario questions. Projections are estimates, not certainties.
 * Below the chat, **תובנות לפני ואחרי משחק** generates a preview, live update or review for any match.
 * With an AI key the analyst answers freely; without one it returns a data-only answer built from the same facts. The badge above the chat shows the mode.
+
+## News feed scrolling
+
+The feed is one unified timeline from Sport5, ONE, Sport1, Ynet Sport and Walla Sport. Keep scrolling: the next 18 stories load automatically before you reach the end. Stories reported by several outlets appear once, as a master card with an outlet tab per source and a source-credit badge.
+
+## Live table ("טבלה בזמן אמת")
+
+During a match day the **Tables** tab counts every game in progress as if it ended now, marks affected clubs with a pulsing "חי" badge and shows ▲/▼ position changes. Tap the chip to switch to the official table.
 
 ## My Club (הקבוצה שלי)
 

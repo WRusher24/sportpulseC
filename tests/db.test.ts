@@ -127,3 +127,26 @@ test("every repository read used by the pages works on Postgres", async () => {
   assert.deepEqual(await repo.ratingSummary("a"), []);
   assert.equal((await repo.getStandings("nba")).length, 30);
 });
+
+test("keyset cursor pagination is complete and duplicate-free even when ties and new stories exist", async () => {
+  const { db, repo } = await setup();
+  await seedDatabase(db);
+  const base = Date.now() - 3600_000;
+  const same = new Date(base).toISOString();
+  for (let i = 0; i < 25; i++) {
+    // pairs of threads share the same timestamp to exercise the id tiebreaker
+    await repo.createThread({ titleHe: `ידיעה ${i}`, teamId: null, category: "football_israel", signature: `sig${i}`, heroImageUrl: null, publishedAt: i % 2 === 0 ? same : new Date(base - i * 1000).toISOString() });
+  }
+  const seen: string[] = [];
+  let before: { at: string; id: string } | undefined;
+  for (let guard = 0; guard < 10; guard++) {
+    const page = await repo.listThreads({ limit: 7, before });
+    if (page.length === 0) break;
+    if (guard === 1) await repo.createThread({ titleHe: "חדשה", teamId: null, category: "other", signature: "new", heroImageUrl: null, publishedAt: new Date().toISOString() });
+    seen.push(...page.map((t) => t.id));
+    const last = page[page.length - 1];
+    before = { at: last.lastPublishedAt, id: last.id };
+  }
+  assert.equal(seen.length, 25);
+  assert.equal(new Set(seen).size, 25);
+});

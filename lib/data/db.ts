@@ -1,6 +1,7 @@
 import { and, asc, desc, eq, gte, ilike, inArray, isNull, lte, or, sql } from "drizzle-orm";
 import type { Database } from "@/db/client";
 import * as s from "@/db/schema";
+import { normalizeMatchState } from "./normalize";
 import type { ClusterCandidate, MatchQuery, NewArticle, RatingInput, Repo, ThreadQuery, UserRecord } from "./repo";
 import type {
   ArticleCategory,
@@ -31,7 +32,7 @@ const toTeam = (r: s.Team): TeamDTO => ({
   aliases: r.aliases,
   primaryColor: r.primaryColor
 });
-const toMatch = (r: s.Match): MatchDTO => ({
+const toMatch = (r: s.Match): MatchDTO => normalizeMatchState({
   id: r.id,
   leagueId: r.leagueId,
   homeTeamId: r.homeTeamId,
@@ -153,6 +154,10 @@ export class DbRepo implements Repo {
     const conds = [];
     if (q.teamId) conds.push(eq(s.masterStoryThreads.teamId, q.teamId));
     if (q.category) conds.push(eq(s.masterStoryThreads.category, q.category));
+    if (q.before) {
+      const at = new Date(q.before.at);
+      conds.push(or(sql`${s.masterStoryThreads.lastPublishedAt} < ${at}`, and(sql`${s.masterStoryThreads.lastPublishedAt} = ${at}`, sql`${s.masterStoryThreads.id} < ${q.before.id}`)));
+    }
     const needle = q.q?.trim();
     if (needle) {
       const like = `%${escapeLike(needle)}%`;
@@ -167,9 +172,8 @@ export class DbRepo implements Repo {
       .select()
       .from(s.masterStoryThreads)
       .where(conds.length ? and(...conds) : undefined)
-      .orderBy(desc(s.masterStoryThreads.lastPublishedAt))
-      .limit(q.limit)
-      .offset(q.offset ?? 0);
+      .orderBy(desc(s.masterStoryThreads.lastPublishedAt), desc(s.masterStoryThreads.id))
+      .limit(q.limit);
     return this.attachArticles(rows);
   }
 

@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { complete, hasAi, parseJsonReply, type AiConfig } from "./client";
 import { firstSentences } from "./text";
+import { cleanText } from "./sanitize";
 
 export type NeutralizeInput = { id: string; title: string; text: string };
 export type NeutralizeResult = { neutralTitle: string; summary: string; clickbaitScore: number };
@@ -48,7 +49,7 @@ export async function neutralizeBatch(ai: AiConfig, items: NeutralizeInput[]): P
 
   if (hasAi(ai)) {
     try {
-      const payload = items.map((i) => ({ id: i.id, title: i.title, text: i.text.slice(0, 1800) }));
+      const payload = items.map((i) => ({ id: i.id, title: cleanText(i.title, 300), text: cleanText(i.text, 1800) }));
       const reply = await complete(ai, { system: SYSTEM, messages: [{ role: "user", content: JSON.stringify({ items: payload }) }], json: true, maxTokens: 400 + items.length * 260 });
       const parsed = schema.parse(parseJsonReply(reply));
       for (const r of parsed.items) {

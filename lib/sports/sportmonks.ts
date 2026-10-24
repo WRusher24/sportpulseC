@@ -87,7 +87,7 @@ export class SportmonksProvider implements SportsProvider {
 
   async fixtures(league: LeagueDTO, fromDay: string, toDay: string): Promise<ProviderMatch[]> {
     if (!league.sportmonksId) return [];
-    const r = await this.get<Fixture>(`/fixtures/between/${fromDay}/${toDay}`, { include: "participants;scores;state;venue;round", filters: `fixtureLeagues:${league.sportmonksId}` }, 300);
+    const r = await this.get<Fixture>(`/fixtures/between/${fromDay}/${toDay}`, { include: "participants;scores;state;venue;round", filters: `fixtureLeagues:${league.sportmonksId}` }, 0);
     return (r.data ?? []).flatMap((f) => this.map(f) ?? []);
   }
 
@@ -96,7 +96,7 @@ export class SportmonksProvider implements SportsProvider {
   }
 
   async detail(_league: LeagueDTO, externalId: string): Promise<ProviderDetail | null> {
-    const r = await this.get<Fixture>(`/fixtures/${externalId}`, { include: "events;participants" }, 30).catch(() => null);
+    const r = await this.get<Fixture>(`/fixtures/${externalId}`, { include: "events;participants" }, 0).catch(() => null);
     const f = r?.data as unknown as Fixture | undefined;
     if (!f?.events) return null;
     const nameOf = (id: number) => f.participants?.find((p) => p.id === id)?.name ?? "";

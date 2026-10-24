@@ -7,7 +7,7 @@ import { InsightPanel } from "@/components/InsightPanel";
 import { Lineups } from "@/components/Lineups";
 import { MatchTabs } from "@/components/MatchTabs";
 import { RatingsPanel } from "@/components/RatingsPanel";
-import { Score } from "@/components/Score";
+import { MatchScore } from "@/components/MatchScore";
 import { StatBars } from "@/components/StatBars";
 import { StatusBadge } from "@/components/StatusBadge";
 import { readableOn } from "@/lib/color";
@@ -67,7 +67,7 @@ export default async function MatchPage({ params, searchParams }: { params: Prom
             <p className="mt-2 text-sm font-bold leading-tight">{home.nameHe}</p>
           </div>
           <div className="flex flex-col items-center gap-1">
-            <Score home={match.homeScore} away={match.awayScore} size="lg" />
+            <MatchScore status={match.status} homeScore={match.homeScore} awayScore={match.awayScore} size="lg" />
             <StatusBadge status={match.status} minute={match.minute} kickoff={match.matchTimestamp} />
           </div>
           <div>

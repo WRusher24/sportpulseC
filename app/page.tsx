@@ -11,7 +11,7 @@ import { liveTicker } from "@/lib/sports/sync";
 import type { ArticleCategory } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
-const PAGE = 10;
+const PAGE = 18;
 
 export default async function FeedPage({ searchParams }: { searchParams: Promise<{ cat?: string; q?: string; mine?: string }> }) {
   const sp = await searchParams;

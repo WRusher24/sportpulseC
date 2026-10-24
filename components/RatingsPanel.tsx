@@ -29,7 +29,6 @@ export function RatingsPanel({ matchId, finished, signedIn, lineUps, homeName, a
   const [pending, start] = useTransition();
   const fan = useMemo(() => new Map(summary.map((s) => [s.playerName, s])), [summary]);
 
-  if (!lineUps) return <p className="card text-sm text-muted">אין עדיין הרכבים לדירוג.</p>;
 
   const set = (name: string, patch: Partial<{ rating: number; note: string | null }>) => {
     setRatings((r) => ({ ...r, [name]: { rating: r[name]?.rating ?? 0, note: r[name]?.note ?? null, ...patch } }));
@@ -48,7 +47,7 @@ export function RatingsPanel({ matchId, finished, signedIn, lineUps, homeName, a
     });
 
   const team = (side: "home" | "away", title: string, players: LineupPlayer[]) => {
-    const media = lineUps.mediaGrades ?? {};
+    const media = lineUps?.mediaGrades ?? {};
     const fanAvg = avg(players.flatMap((p) => (fan.get(p.name) ? [fan.get(p.name)!.average] : [])));
     const mediaAvg = avg(players.flatMap((p) => (media[`${side}:${p.name}`] !== undefined ? [media[`${side}:${p.name}`]] : [])));
     return (
@@ -106,8 +105,14 @@ export function RatingsPanel({ matchId, finished, signedIn, lineUps, homeName, a
       {finished && !signedIn && (
         <p className="card text-sm">כדי לדרג שחקנים <Link href="/account" className="font-bold text-accent">התחברו או הירשמו</Link>. הממוצעים של האוהדים גלויים לכולם.</p>
       )}
-      {team("home", homeName, lineUps.home.players)}
-      {team("away", awayName, lineUps.away.players)}
+      {lineUps ? (
+        <>
+          {team("home", homeName, lineUps.home.players)}
+          {team("away", awayName, lineUps.away.players)}
+        </>
+      ) : (
+        <FreeFormPlayers {...{ finished, signedIn, summary, ratings, setRating: set, open, setOpen, fan }} />
+      )}
       {finished && signedIn && (
         <div className="sticky bottom-[calc(env(safe-area-inset-bottom)+4.5rem)] z-20 flex items-center gap-3 rounded-2xl border border-line/60 bg-surface/95 p-3 backdrop-blur">
           <button className="btn-primary" onClick={save} disabled={pending || dirty.size === 0}>{pending ? "שומרים…" : `שמירת דירוגים${dirty.size ? ` (${fmtNum(dirty.size)})` : ""}`}</button>
@@ -115,5 +120,60 @@ export function RatingsPanel({ matchId, finished, signedIn, lineUps, homeName, a
         </div>
       )}
     </div>
+  );
+}
+
+/** No provider lineups yet: fans add the players they want to rate; community averages are shared. */
+function FreeFormPlayers({ finished, signedIn, summary, ratings, setRating, open, setOpen, fan }: { finished: boolean; signedIn: boolean; summary: RatingSummary[]; ratings: Mine; setRating: (name: string, patch: Partial<{ rating: number; note: string | null }>) => void; open: string | null; setOpen: (v: string | null) => void; fan: Map<string, RatingSummary> }) {
+  const [name, setName] = useState("");
+  const names = [...new Set([...summary.map((s) => s.playerName), ...Object.keys(ratings)])];
+  const add = () => {
+    const n = name.replace(/\s+/g, " ").trim();
+    if (n.length < 2) return;
+    setRating(n, { rating: ratings[n]?.rating ?? 0 });
+    setOpen(n);
+    setName("");
+  };
+  return (
+    <section className="card !p-3" aria-label="דירוג שחקנים">
+      <h3 className="mb-1 font-bold">דרגו שחקנים</h3>
+      <p className="mb-3 text-xs text-muted">ההרכבים הרשמיים עדיין לא זמינים. אפשר להוסיף שחקן בעברית או באנגלית ולדרג אותו; הממוצע של כל האוהדים מוצג לכולם.</p>
+      {finished && signedIn && (
+        <form className="mb-3 flex gap-2" onSubmit={(e) => { e.preventDefault(); add(); }}>
+          <label htmlFor="add-player" className="sr-only">שם שחקן</label>
+          <input id="add-player" className="input flex-1" value={name} maxLength={60} onChange={(e) => setName(e.target.value)} placeholder="שם שחקן (עברית / English)" />
+          <button className="btn-primary" type="submit" disabled={name.trim().length < 2}>הוספה</button>
+        </form>
+      )}
+      {names.length === 0 && <p className="text-sm text-muted">עוד לא דורגו שחקנים במשחק הזה.</p>}
+      <ul>
+        {names.map((p) => {
+          const f = fan.get(p);
+          const my = ratings[p];
+          const isOpen = open === p;
+          return (
+            <li key={p} className="border-t border-line/40 first:border-t-0">
+              <button className="flex min-h-[48px] w-full items-center gap-2 text-start" onClick={() => setOpen(isOpen ? null : p)} aria-expanded={isOpen} disabled={!finished || !signedIn}>
+                <span className="min-w-0 flex-1 truncate text-sm font-medium">{p}</span>
+                <span className="w-16 text-center text-xs"><span className="block text-[10px] text-muted">אוהדים{f ? ` (${fmtNum(f.count)})` : ""}</span><b className="num text-accent">{f ? fmtNum(f.average, 1) : "–"}</b></span>
+                <span className="w-12 text-center text-xs"><span className="block text-[10px] text-muted">תקשורת</span><b>–</b></span>
+                <span className={`grid h-9 w-9 place-items-center rounded-full border text-sm font-extrabold ${my?.rating ? "border-accent bg-accent text-accent-fg" : "border-line/70 text-muted"}`}><span className="num">{my?.rating ? fmtNum(my.rating) : "+"}</span></span>
+              </button>
+              {isOpen && (
+                <div className="pb-3">
+                  <div className="grid grid-cols-5 gap-1.5 sm:grid-cols-10" role="radiogroup" aria-label={`הציון שלכם ל${p}`}>
+                    {Array.from({ length: 10 }, (_, i) => i + 1).map((n) => (
+                      <button key={n} role="radio" aria-checked={my?.rating === n} onClick={() => setRating(p, { rating: n })} className={`num min-h-[40px] rounded-lg border text-sm font-bold ${my?.rating === n ? "border-accent bg-accent text-accent-fg" : "border-line/70 bg-bg hover:border-accent"}`}>{fmtNum(n)}</button>
+                    ))}
+                  </div>
+                  <label className="mt-2 block text-xs text-muted" htmlFor={`note-${p}`}>הערה קצרה (אופציונלי)</label>
+                  <textarea id={`note-${p}`} className="input mt-1 !min-h-[64px] py-2" maxLength={280} value={my?.note ?? ""} onChange={(e) => setRating(p, { note: e.target.value })} />
+                </div>
+              )}
+            </li>
+          );
+        })}
+      </ul>
+    </section>
   );
 }

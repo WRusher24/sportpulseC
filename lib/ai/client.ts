@@ -109,7 +109,7 @@ async function send(ai: ReadyAi, o: CompleteOptions, stream: boolean): Promise<R
 /** Custom endpoints may be user-supplied: never follow redirects (they could point at internal hosts). */
 const safeInit = (ai: ReadyAi, init: RequestInit): RequestInit => (ai.provider === "custom" ? { ...init, redirect: "error" } : init);
 
-async function fail(res: Response): Promise<never> {
+async function fail(res: Response, ai?: ReadyAi): Promise<never> {
   let detail = "";
   try {
     const body = (await res.json()) as { error?: { message?: string } | string };
@@ -119,14 +119,15 @@ async function fail(res: Response): Promise<never> {
   }
   const hint = res.status === 401 || res.status === 403 ? "מפתח ה-API נדחה" : res.status === 429 ? "חריגה ממכסת הבקשות של ספק ה-AI" : "שגיאת ספק AI";
   // The provider message never contains the key, but cap it anyway.
-  throw new AiError(`${hint} (${res.status})${detail ? `: ${detail.slice(0, 160)}` : ""}`, res.status);
+  const modelHint = ai?.provider === "gemini" && res.status === 404 ? " · המודל אינו זמין – השאירו את שדה המודל ריק בהגדרות לבחירה אוטומטית של המודל העדכני" : "";
+  throw new AiError(`${hint} (${res.status})${detail ? `: ${detail.slice(0, 160)}` : ""}${modelHint}`, res.status);
 }
 
 /** One-shot completion. Throws AiError on provider failure. */
 export async function complete(ai: AiConfig, o: CompleteOptions): Promise<string> {
   if (!hasAi(ai)) throw new AiError("לא הוגדר מפתח AI", 400);
   const res = await send(ai, o, false);
-  if (!res.ok) await fail(res);
+  if (!res.ok) await fail(res, ai);
   const data = (await res.json()) as {
     choices?: Array<{ message?: { content?: string } }>;
     content?: Array<{ type: string; text?: string }>;
@@ -141,7 +142,7 @@ export async function complete(ai: AiConfig, o: CompleteOptions): Promise<string
 export async function* streamCompletion(ai: AiConfig, o: CompleteOptions): AsyncGenerator<string> {
   if (!hasAi(ai)) throw new AiError("לא הוגדר מפתח AI", 400);
   const res = await send(ai, o, true);
-  if (!res.ok) await fail(res);
+  if (!res.ok) await fail(res, ai);
   if (!res.body) throw new AiError("תגובה ריקה מספק ה-AI", 502);
   const reader = res.body.getReader();
   const decoder = new TextDecoder();

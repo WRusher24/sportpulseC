@@ -77,6 +77,15 @@ Scraped data has no lineups, per-match statistics or event timelines (those need
 
 > Honest limits: the portal parsers and ESPN mappings are covered by unit tests on representative HTML/JSON, but the build environment could not reach those sites. If a portal changes its structure or hides tables behind JavaScript rendering, that source silently yields nothing and the next one is used; check `GET /api/cron/ingest` (per-source errors in the JSON) after deploying.
 
+### Match correctness rules
+
+* All day grouping, kick-off parsing and "today" logic use `Asia/Jerusalem` (daylight saving aware); provider timestamps are stored as UTC instants.
+* The match **status is authoritative** for rendering: UPCOMING never shows a score, LIVE shows score + minute, FINAL shows the score without a minute (`lib/data/normalize.ts`). A "live" row older than 3.5 hours becomes FINAL; one that starts in the future becomes UPCOMING.
+* Provider/scraper calls bypass Next's data cache (`no-store`), so cached payloads cannot override fresh fixture or event states.
+* Portal scraping merges what several sites say about the same fixture: home/away orientation is decided by **vote** across sources (scores are flipped to the winning orientation) and the most advanced status wins; one pairing yields one row per Israel day.
+* Events, statistics and lineups come from ESPN's match summary for Premier League, La Liga, Champions League (or a paid provider for everything else); finished matches are back-filled within 3 days. Portals provide scores and tables only.
+* **Live standings ("טבלה בזמן אמת")**: the Tables tab adds every in-progress match to the official table (with ▲/▼ movement); "חזרה לטבלה הרשמית" shows the provider table unchanged.
+
 ### How often it runs (3 layers)
 
 | Layer | Frequency | Notes |
@@ -91,7 +100,9 @@ Scraping notes: the user-agent identifies the bot, requests have timeouts/size c
 
 ### AI providers
 
-Gemini, OpenAI, Anthropic and any OpenAI-compatible endpoint are first-class. Gemini 1.5 models have been retired by Google, so the defaults are `gemini-3.8-flash` / `-pro`; any model id can be typed in Settings. User-supplied custom endpoints must be public HTTPS (localhost, private IPs and redirects are refused to prevent SSRF); the operator-controlled `CUSTOM_AI_BASE_URL` variable may point anywhere.
+Gemini, OpenAI, Anthropic and any OpenAI-compatible endpoint are first-class. Gemini model names are retired regularly (1.5 and 2.5 already have been). The default is `gemini-3.8-flash`; if Google answers 404 for a model you did not pin, the app asks Google's model list for the newest Flash model your key can use and retries. Leave the model field empty for this automatic behaviour; a model typed in Settings (or `GEMINI_MODEL`) is used exactly as given.
+
+The analyst never ends on a bare error: if the LLM fails, the reply falls back to the data-driven answer built from the same facts. Context sent to any LLM is sanitised (control characters, code fences and instruction-like phrases removed, lengths capped) and all Server Actions are guarded so the UI receives a clean error message instead of an exception. User-supplied custom endpoints must be public HTTPS (localhost, private IPs and redirects are refused to prevent SSRF); the operator-controlled `CUSTOM_AI_BASE_URL` variable may point anywhere.
 
 ## 6. Local development
 
@@ -102,7 +113,16 @@ npm run dev                  # http://localhost:3000 (in-memory store when DATAB
 npm run typecheck && npm test
 ```
 
-## 7. Verification checklist after deploying
+## 7. Quality gates
+
+```bash
+npm run typecheck        # TypeScript
+npm test                 # 37 tests: parsers, scraping merge, providers, credentials, SQL migration/seed/repository on real Postgres (PGlite), RTL + Western-digit render audit
+npm run build && npm run verify:serverless   # fails if any third-party package would be require()d at runtime (the ERR_REQUIRE_ESM class of bug)
+npm run audit:ui         # needs a running server and a global playwright: RTL, Western digits, no overflow, WCAG AA contrast, 4 themes x 7 pages
+```
+
+## 8. Verification checklist after deploying
 
 1. `/settings` → API keys → "בדיקת מפתח" confirms the AI and sports keys.
 2. Trigger ingestion once: `curl -H "Authorization: Bearer $CRON_SECRET" https://<app>/api/cron/ingest` and inspect the JSON report (per-source errors show feed problems).

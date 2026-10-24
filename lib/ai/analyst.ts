@@ -3,6 +3,7 @@ import { buildTeamFacts, FORM_HE, matchSummaryLine, type TeamFacts } from "@/lib
 import type { Repo } from "@/lib/data/repo";
 import { fmtDate, fmtNum, fmtPct } from "@/lib/format";
 import type { MatchDTO, TeamDTO } from "@/lib/types";
+import { cleanDeep, cleanText } from "./sanitize";
 import { complete, hasAi, streamCompletion, type AiConfig, type ChatMessage } from "./client";
 
 export const ANALYST_SYSTEM = `אתה "האנליסט" – עוזר טקטי וסטטיסטי של אפליקציית הספורט הישראלית "ספורט פאלס".
@@ -68,9 +69,9 @@ export function ruleBasedAnswer(question: string, ctx: AnalystContext): string {
 }
 
 export function analystMessages(history: ChatMessage[], question: string, ctx: AnalystContext): ChatMessage[] {
-  const trimmed = history.slice(-6).map((m) => ({ role: m.role, content: m.content.slice(0, 1500) }));
-  const data = ctx.facts.length ? JSON.stringify(ctx.facts) : "לא זוהתה קבוצה בשאלה – ענה בהסבר כללי ובקש מהמשתמש לציין קבוצה.";
-  return [...trimmed, { role: "user", content: `${question.slice(0, 1200)}\n\nנתונים:\n${data}` }];
+  const trimmed = history.slice(-6).map((m) => ({ role: m.role, content: cleanText(m.content, 1500) })).filter((m) => m.content);
+  const data = ctx.facts.length ? JSON.stringify(cleanDeep(ctx.facts)) : "לא זוהתה קבוצה בשאלה – ענה בהסבר כללי ובקש מהמשתמש לציין קבוצה.";
+  return [...trimmed, { role: "user", content: `${cleanText(question, 1200)}\n\nנתונים:\n${data}` }];
 }
 
 /** Streams the analyst reply: LLM when a key is available, otherwise the data-driven answer in small chunks. */
@@ -81,7 +82,20 @@ export async function* analystReply(ai: AiConfig, repo: Repo, history: ChatMessa
     for (let i = 0; i < text.length; i += 24) yield text.slice(i, i + 24);
     return;
   }
-  yield* streamCompletion(ai, { system: ANALYST_SYSTEM, messages: analystMessages(history, question, ctx), maxTokens: 900 });
+  let produced = false;
+  try {
+    for await (const chunk of streamCompletion(ai, { system: ANALYST_SYSTEM, messages: analystMessages(history, question, ctx), maxTokens: 900 })) {
+      produced = true;
+      yield chunk;
+    }
+    if (!produced) throw new Error("תשובה ריקה מספק ה-AI");
+  } catch (e) {
+    // Never leave the user with a bare error: fall back to the data-driven answer built from the same facts.
+    console.warn("[analyst] LLM failed:", e instanceof Error ? e.message : e);
+    const reason = e instanceof Error ? cleanText(e.message, 140) : "שגיאה";
+    const note = `⚠️ שירות ה-AI לא הגיב (${reason}). הנה ניתוח מבוסס נתונים במקום:\n\n`;
+    yield (produced ? "\n\n" : "") + note + ruleBasedAnswer(question, ctx);
+  }
 }
 
 /* ------------------------------------------------------------------ pre / post match insights */
@@ -105,7 +119,7 @@ export async function matchInsight(
     buildTeamFacts(repo, teamMap.get(match.awayTeamId) as TeamDTO, leagues, teamMap),
     repo.headToHead(match.homeTeamId, match.awayTeamId, 5)
   ]);
-  const facts = {
+  const facts = cleanDeep({
     mode,
     match: { league: leagues.find((l) => l.id === match.leagueId)?.nameHe, round: match.round, venue: match.venue, date: fmtDate(match.matchTimestamp), status: match.status, minute: match.minute, score: match.homeScore === null ? null : `${fmtNum(match.homeScore)}:${fmtNum(match.awayScore ?? 0)} (${name(match.homeTeamId)}:${name(match.awayTeamId)})` },
     stats: match.stats,
@@ -113,7 +127,7 @@ export async function matchInsight(
     home: { ...home, lastMatch: undefined },
     away: { ...away, lastMatch: undefined },
     headToHead: h2h.map((m) => matchSummaryLine(m, name))
-  };
+  });
 
   if (hasAi(ai)) {
     try {

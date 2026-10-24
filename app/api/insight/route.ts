@@ -15,7 +15,12 @@ export async function GET(req: Request) {
     const rl = rateLimit(`insight:${clientIp(req)}`, 30, 3_600_000);
     if (!rl.ok) return NextResponse.json({ error: "חרגתם ממכסת התובנות לשעה" }, { status: 429 });
   }
-  const result = await matchInsight(getRepo(), creds.ai, matchId);
-  if (!result) return NextResponse.json({ error: "המשחק לא נמצא" }, { status: 404 });
-  return NextResponse.json(result, { headers: { "cache-control": "no-store" } });
+  try {
+    const result = await matchInsight(getRepo(), creds.ai, matchId);
+    if (!result) return NextResponse.json({ error: "המשחק לא נמצא" }, { status: 404 });
+    return NextResponse.json(result, { headers: { "cache-control": "no-store" } });
+  } catch (e) {
+    console.error("[insight]", e instanceof Error ? e.message : e);
+    return NextResponse.json({ error: "לא הצלחנו להפיק תובנה כרגע. נסו שוב בעוד רגע." }, { status: 500 });
+  }
 }

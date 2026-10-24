@@ -54,12 +54,12 @@ export class ApiFootballProvider implements SportsProvider {
     private readonly basketballKey: string | null
   ) {}
 
-  private football<T>(path: string, revalidate = 20) {
+  private football<T>(path: string, revalidate = 0) {
     if (!this.footballKey) return Promise.resolve({ response: [] as T[] });
     return getJson<{ response: T[] }>(`${FOOTBALL}${path}`, { "x-apisports-key": this.footballKey }, revalidate);
   }
 
-  private basket<T>(path: string, revalidate = 20) {
+  private basket<T>(path: string, revalidate = 0) {
     if (!this.basketballKey) return Promise.resolve({ response: [] as T[] });
     return getJson<{ response: T[] }>(`${BASKETBALL}${path}`, { "x-apisports-key": this.basketballKey }, revalidate);
   }
@@ -109,7 +109,7 @@ export class ApiFootballProvider implements SportsProvider {
   async fixtures(league: LeagueDTO, fromDay: string, toDay: string): Promise<ProviderMatch[]> {
     const year = seasonStartYear(league.season);
     if (league.apiFootballId) {
-      const r = await this.football<FootballFixture>(`/fixtures?league=${league.apiFootballId}&season=${year}&from=${fromDay}&to=${toDay}`, 300);
+      const r = await this.football<FootballFixture>(`/fixtures?league=${league.apiFootballId}&season=${year}&from=${fromDay}&to=${toDay}`, 0);
       return r.response.map((x) => this.mapFootball(x));
     }
     if (league.apiBasketballId) {
@@ -117,7 +117,7 @@ export class ApiFootballProvider implements SportsProvider {
       for (let t = Date.parse(fromDay); t <= Date.parse(toDay) && days.length < 14; t += 86_400_000) days.push(new Date(t).toISOString().slice(0, 10));
       const out: ProviderMatch[] = [];
       for (const d of days) {
-        const r = await this.basket<BasketGame>(`/games?league=${league.apiBasketballId}&season=${year}-${year + 1}&date=${d}`, 300);
+        const r = await this.basket<BasketGame>(`/games?league=${league.apiBasketballId}&season=${year}-${year + 1}&date=${d}`, 0);
         out.push(...r.response.map((g) => this.mapBasket(g)));
       }
       return out;
@@ -129,7 +129,7 @@ export class ApiFootballProvider implements SportsProvider {
     const year = seasonStartYear(league.season);
     if (league.apiFootballId) {
       type Row = { team: { name: string }; points: number; form?: string | null; all: { played: number; win: number; draw: number; lose: number; goals: { for: number; against: number } } };
-      const r = await this.football<{ league: { standings: Row[][] } }>(`/standings?league=${league.apiFootballId}&season=${year}`, 300);
+      const r = await this.football<{ league: { standings: Row[][] } }>(`/standings?league=${league.apiFootballId}&season=${year}`, 0);
       const rows = r.response[0]?.league.standings.flat() ?? [];
       return rows.map((x) => ({
         teamName: x.team.name,
@@ -145,7 +145,7 @@ export class ApiFootballProvider implements SportsProvider {
     }
     if (league.apiBasketballId) {
       type Row = { team: { name: string }; games: { played: number; win: { total: number }; lose: { total: number } }; points: { for: number; against: number } };
-      const r = await this.basket<Row[]>(`/standings?league=${league.apiBasketballId}&season=${year}-${year + 1}`, 300);
+      const r = await this.basket<Row[]>(`/standings?league=${league.apiBasketballId}&season=${year}-${year + 1}`, 0);
       const rows = (r.response[0] ?? []) as Row[];
       return rows.map((x) => ({
         teamName: x.team.name,
@@ -168,9 +168,9 @@ export class ApiFootballProvider implements SportsProvider {
     type St = { team: { name: string }; statistics: Array<{ type: string; value: string | number | null }> };
     type Lu = { team: { name: string }; coach?: { name?: string | null }; formation?: string | null; startXI: Array<{ player: { name: string; number: number | null; pos: string | null } }>; substitutes: Array<{ player: { name: string; number: number | null; pos: string | null } }> };
     const [ev, st, lu] = await Promise.all([
-      this.football<Ev>(`/fixtures/events?fixture=${externalId}`, 30),
-      this.football<St>(`/fixtures/statistics?fixture=${externalId}`, 30),
-      this.football<Lu>(`/fixtures/lineups?fixture=${externalId}`, 300)
+      this.football<Ev>(`/fixtures/events?fixture=${externalId}`, 0),
+      this.football<St>(`/fixtures/statistics?fixture=${externalId}`, 0),
+      this.football<Lu>(`/fixtures/lineups?fixture=${externalId}`, 0)
     ]);
 
     const events: ProviderEvent[] = ev.response.flatMap((e): ProviderEvent[] => {

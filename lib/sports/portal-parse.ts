@@ -180,7 +180,8 @@ export function parseResults(html: string, ctx: ScrapeContext, now = new Date())
       minute = liveMin ? Number(liveMin[1]) : null;
     } else status = "finished";
 
-    const kickoff = time ? israelLocalToUtc(d.y, d.mo, d.d, Number(time[1]), Number(time[2])) : israelLocalToUtc(d.y, d.mo, d.d, status === "finished" ? 12 : now.getUTCHours() + 3, 0);
+    // Without an explicit time: a live match started `minute` minutes ago; a result without a clock is stamped at noon Israel time of its day.
+    const kickoff = time ? israelLocalToUtc(d.y, d.mo, d.d, Number(time[1]), Number(time[2])) : status === "finished" || !minute ? israelLocalToUtc(d.y, d.mo, d.d, 12, 0) : new Date(now.getTime() - minute * 60_000);
     const dayKey = `${d.y}${String(d.mo).padStart(2, "0")}${String(d.d).padStart(2, "0")}`;
     const externalId = `portal-${pair.home.id}-${pair.away.id}-${dayKey}`;
     const prev = out.get(externalId);

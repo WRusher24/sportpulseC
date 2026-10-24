@@ -105,6 +105,26 @@ export async function syncLive(repo: Repo, provider: SportsProvider, leagues: Le
   return { updated, details };
 }
 
+/** Fills events / stats / lineups for matches that finished in the last 3 days and have none yet (a few per run, quota friendly). */
+export async function syncFinishedDetails(repo: Repo, provider: SportsProvider, leagues: LeagueDTO[], budget = 4): Promise<number> {
+  const recent = await repo.listMatches({ status: ["finished"], from: new Date(Date.now() - 3 * 86_400_000), order: "desc" });
+  const matcher = new TeamMatcher(await repo.listTeams());
+  let done = 0;
+  for (const m of recent) {
+    if (done >= budget) break;
+    const league = leagues.find((l) => l.id === m.leagueId);
+    if (!league || !m.externalId || m.lineUps || m.stats || !provider.supports(league)) continue;
+    const d = await provider.detail(league, m.externalId).catch(() => null);
+    if (!d) continue;
+    const teamId = (name: string) => matcher.find(name, league.sportType, league.id)?.id ?? null;
+    await repo.replaceEvents(m.id, d.events.map((e) => ({ minute: e.minute, teamId: teamId(e.teamName), eventType: e.eventType, playerName: e.playerName, description: e.description })));
+    const lineUps = d.lineUps ? (({ teamName: _h, ...home }, { teamName: _a, ...away }) => ({ home, away }))(d.lineUps.home, d.lineUps.away) : m.lineUps;
+    await repo.upsertMatches([{ ...m, stats: d.stats ?? m.stats, lineUps }]);
+    done++;
+  }
+  return done;
+}
+
 export async function leaguesDueForSync(repo: Repo, leagues: LeagueDTO[], provider: SportsProvider): Promise<LeagueDTO[]> {
   const due: LeagueDTO[] = [];
   for (const l of leagues.filter((x) => provider.supports(x))) {

@@ -41,7 +41,8 @@ export type ThreadQuery = {
   category?: ArticleCategory;
   q?: string;
   limit: number;
-  offset?: number;
+  /** Keyset cursor: only threads strictly older than (lastPublishedAt, id). Stable while new stories keep arriving. */
+  before?: { at: string; id: string };
 };
 
 export type NewArticle = Omit<ArticleDTO, "id" | "neutralTitle" | "threadId"> & { neutralTitle?: string | null };

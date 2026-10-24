@@ -1,7 +1,7 @@
 import { ProviderError } from "./types";
 
-export async function getJson<T>(url: string, headers: Record<string, string>, revalidate = 20): Promise<T> {
-  const res = await fetch(url, { headers: { accept: "application/json", ...headers }, signal: AbortSignal.timeout(15_000), next: { revalidate } });
+export async function getJson<T>(url: string, headers: Record<string, string>, revalidate = 0): Promise<T> {
+  const res = await fetch(url, { headers: { accept: "application/json", ...headers }, signal: AbortSignal.timeout(15_000), ...(revalidate > 0 ? { next: { revalidate } } : { cache: "no-store" as const }) });
   if (!res.ok) throw new ProviderError(res.status === 401 || res.status === 403 ? "מפתח נתוני הספורט נדחה" : `שגיאת ספק נתונים (${res.status})`, res.status);
   return (await res.json()) as T;
 }

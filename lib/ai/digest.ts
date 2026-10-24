@@ -4,6 +4,7 @@ import { fmtNum, israelDayKey } from "@/lib/format";
 import type { DigestDTO, TeamDTO } from "@/lib/types";
 import { ANALYST_SYSTEM } from "./analyst";
 import { complete, hasAi, type AiConfig } from "./client";
+import { cleanDeep } from "./sanitize";
 
 const DIGEST_SYSTEM = `${ANALYST_SYSTEM}
 
@@ -26,7 +27,7 @@ export async function generateDigest(repo: Repo, ai: AiConfig, teamId: string, d
   let generatedBy = "template";
   if (hasAi(ai)) {
     try {
-      content = (await complete(ai, { system: DIGEST_SYSTEM, messages: [{ role: "user", content: `נתונים:\n${JSON.stringify({ team: team.nameHe, news, transfers, facts: { standing: facts.standing, recent: facts.recent.slice(0, 3), upcoming: facts.upcoming, dataSource: facts.dataSource } })}` }], maxTokens: 600 })).trim();
+      content = (await complete(ai, { system: DIGEST_SYSTEM, messages: [{ role: "user", content: `נתונים:\n${JSON.stringify(cleanDeep({ team: team.nameHe, news, transfers, facts: { standing: facts.standing, recent: facts.recent.slice(0, 3), upcoming: facts.upcoming, dataSource: facts.dataSource } }))}` }], maxTokens: 600 })).trim();
       generatedBy = "ai";
     } catch (e) {
       console.warn("[ai] digest failed, using template:", e instanceof Error ? e.message : e);

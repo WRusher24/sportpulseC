@@ -1,6 +1,6 @@
-import type { LeagueDTO, MatchStatus } from "@/lib/types";
+import type { EventType, LeagueDTO, LineupPlayer, MatchStats, MatchStatus } from "@/lib/types";
 import { getJson } from "./http";
-import type { ProviderDetail, ProviderMatch, ProviderStanding, SportsProvider } from "./types";
+import type { ProviderDetail, ProviderEvent, ProviderMatch, ProviderStanding, SportsProvider } from "./types";
 
 /**
  * Free source #1: ESPN's public (unofficial, key-less) JSON endpoints. No registration or subscription.
@@ -93,6 +93,79 @@ export function mapEspnStandings(root: { children?: Array<{ standings?: { entrie
   });
 }
 
+type Summary = {
+  keyEvents?: Array<{ type?: { text?: string; type?: string }; clock?: { displayValue?: string }; team?: { displayName?: string }; participants?: Array<{ athlete?: { displayName?: string } }>; text?: string; shortText?: string }>;
+  boxscore?: { teams?: Array<{ homeAway?: "home" | "away"; team?: { displayName?: string }; statistics?: Array<{ name?: string; displayValue?: string }> }> };
+  rosters?: Array<{ homeAway?: "home" | "away"; team?: { displayName?: string }; formation?: string; roster?: Array<{ starter?: boolean; jersey?: string; athlete?: { displayName?: string }; position?: { abbreviation?: string } }> }>;
+};
+
+/** "45'+2'" -> 47, "67'" -> 67 */
+const parseClock = (v?: string): number | null => {
+  const m = /(\d+)'?(?:\s*\+\s*(\d+))?/.exec(v ?? "");
+  return m ? Number(m[1]) + Number(m[2] ?? 0) : null;
+};
+
+export function mapEspnSummary(sum: Summary): ProviderDetail | null {
+  const events: ProviderEvent[] = (sum.keyEvents ?? []).flatMap((e): ProviderEvent[] => {
+    const text = `${e.type?.text ?? ""} ${e.type?.type ?? ""}`.toLowerCase();
+    const minute = parseClock(e.clock?.displayValue);
+    if (minute === null || !e.team?.displayName) return [];
+    const names = (e.participants ?? []).map((p) => p.athlete?.displayName).filter((n): n is string => Boolean(n));
+    let eventType: EventType | null = null;
+    let description: string | null = null;
+    if (text.includes("own goal")) [eventType, description] = ["goal", "שער עצמי"];
+    else if (text.includes("penalty") && text.includes("scored")) [eventType, description] = ["goal", "פנדל"];
+    else if (text.includes("goal") && !text.includes("disallow")) [eventType, description] = ["goal", names[1] ? `בישול: ${names[1]}` : "שער"];
+    else if (text.includes("red card")) [eventType, description] = ["card", "כרטיס אדום"];
+    else if (text.includes("yellow card")) [eventType, description] = ["card", "כרטיס צהוב"];
+    else if (text.includes("substitution")) [eventType, description] = ["substitution", names[1] ? `חילוף: ${names[0]} ↔ ${names[1]}` : "חילוף"];
+    else if (text.includes("var")) [eventType, description] = ["var", `בדיקת VAR${e.shortText ? ` – ${e.shortText}` : ""}`];
+    return eventType ? [{ minute, teamName: e.team.displayName, eventType, playerName: names[0] ?? "—", description }] : [];
+  });
+
+  let stats: MatchStats | null = null;
+  const teams = sum.boxscore?.teams ?? [];
+  const home = teams.find((t) => t.homeAway === "home");
+  const away = teams.find((t) => t.homeAway === "away");
+  if (home && away) {
+    const val = (t: typeof home, ...names: string[]) => {
+      const raw = t.statistics?.find((s) => s.name && names.includes(s.name))?.displayValue;
+      return raw === undefined ? undefined : Number.parseFloat(raw);
+    };
+    const pair = (...names: string[]): [number, number] | undefined => {
+      const a = val(home, ...names);
+      const b = val(away, ...names);
+      return a === undefined || b === undefined || Number.isNaN(a) || Number.isNaN(b) ? undefined : [a, b];
+    };
+    const pass = pair("passPct");
+    const built: MatchStats = {
+      possession: pair("possessionPct"),
+      shots: pair("totalShots"),
+      shotsOnTarget: pair("shotsOnTarget"),
+      corners: pair("wonCorners"),
+      offsides: pair("offsides"),
+      fouls: pair("foulsCommitted"),
+      // ESPN reports pass accuracy as a 0-1 fraction
+      passAccuracy: pass ? (pass.map((v) => (v <= 1 ? Math.round(v * 100) : Math.round(v))) as [number, number]) : undefined
+    };
+    for (const [k, v] of Object.entries(built)) if (v) (stats ??= {})[k as keyof MatchStats] = v;
+  }
+
+  let lineUps: ProviderDetail["lineUps"] = null;
+  const rh = sum.rosters?.find((r) => r.homeAway === "home");
+  const ra = sum.rosters?.find((r) => r.homeAway === "away");
+  if (rh?.roster?.length && ra?.roster?.length && rh.team?.displayName && ra.team?.displayName) {
+    const side = (r: NonNullable<typeof rh>) => ({
+      teamName: r.team?.displayName as string,
+      formation: r.formation ?? null,
+      coach: null,
+      players: (r.roster ?? []).flatMap((p): LineupPlayer[] => (p.athlete?.displayName ? [{ name: p.athlete.displayName, number: p.jersey ? Number(p.jersey) || null : null, position: p.position?.abbreviation ?? null, starter: Boolean(p.starter) }] : []))
+    });
+    lineUps = { home: side(rh), away: side(ra) };
+  }
+  return events.length || stats || lineUps ? { events, stats, lineUps } : null;
+}
+
 export class EspnProvider implements SportsProvider {
   readonly id = "espn" as const;
   readonly liveDirect = false;
@@ -106,7 +179,7 @@ export class EspnProvider implements SportsProvider {
     const path = ESPN_PATHS[league.id];
     if (!path) return [];
     const basketball = league.sportType === "basketball";
-    const data = await getJson<{ events?: EspnEvent[] }>(`${SITE}/${path}/scoreboard?dates=${yyyymmdd(from)}-${yyyymmdd(to)}&limit=300`, {}, 60);
+    const data = await getJson<{ events?: EspnEvent[] }>(`${SITE}/${path}/scoreboard?dates=${yyyymmdd(from)}-${yyyymmdd(to)}&limit=300`, {}, 0);
     return (data.events ?? []).flatMap((e) => mapEspnEvent(e, league.id, basketball) ?? []);
   }
 
@@ -123,10 +196,12 @@ export class EspnProvider implements SportsProvider {
   async standings(league: LeagueDTO): Promise<ProviderStanding[]> {
     const path = ESPN_PATHS[league.id];
     if (!path) return [];
-    return mapEspnStandings(await getJson(`${STANDINGS}/${path}/standings`, {}, 300), league.sportType === "basketball");
+    return mapEspnStandings(await getJson(`${STANDINGS}/${path}/standings`, {}, 0), league.sportType === "basketball");
   }
 
-  async detail(): Promise<ProviderDetail | null> {
-    return null;
+  async detail(league: LeagueDTO, externalId: string): Promise<ProviderDetail | null> {
+    const path = ESPN_PATHS[league.id];
+    if (!path || league.sportType !== "football" || !externalId.startsWith("espn-")) return null;
+    return mapEspnSummary(await getJson<Summary>(`${SITE}/${path}/summary?event=${encodeURIComponent(externalId.slice(5))}`, {}, 0));
   }
 }

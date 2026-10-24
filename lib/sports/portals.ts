@@ -10,12 +10,37 @@ const g = globalThis as unknown as { __sp_portal?: { snap?: Snapshot; inflight?:
 const store = (g.__sp_portal ??= {});
 const TTL_MS = 4 * 60_000;
 
+const RANK: Record<ProviderMatch["status"], number> = { scheduled: 0, postponed: 0, finished: 1, first_half: 2, half_time: 2, second_half: 2, extra_time: 2 };
+const dayOf = (iso: string) => new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Jerusalem" }).format(new Date(iso));
+
+/**
+ * Merges what several portals say about the same fixture. Portals disagree on markup (RTL text order is ambiguous), so the
+ * home/away orientation is decided by VOTE across sources; a candidate with the opposite orientation has its score flipped
+ * before the most advanced status (live > final > upcoming) is chosen. Never produces two rows for one pairing on one Israel day.
+ */
+export function mergeCandidates(candidates: ProviderMatch[]): ProviderMatch[] {
+  const groups = new Map<string, ProviderMatch[]>();
+  for (const m of candidates) {
+    const key = `${m.leagueId}|${[m.homeName, m.awayName].sort().join("|")}|${dayOf(m.kickoff)}`;
+    groups.set(key, [...(groups.get(key) ?? []), m]);
+  }
+  const out: ProviderMatch[] = [];
+  for (const group of groups.values()) {
+    const votes = new Map<string, number>();
+    for (const m of group) votes.set(m.homeName, (votes.get(m.homeName) ?? 0) + 1);
+    const home = [...votes.entries()].sort((a, b) => b[1] - a[1])[0][0]; // ties keep first-seen order
+    const aligned = group.map((m) => (m.homeName === home ? m : { ...m, homeName: m.awayName, awayName: m.homeName, homeScore: m.awayScore, awayScore: m.homeScore }));
+    const best = aligned.sort((a, b) => RANK[b.status] - RANK[a.status])[0];
+    out.push(best);
+  }
+  return out;
+}
+
 /** Crawls every configured portal once: home/section page + up to 5 discovered table/result pages each. */
 export async function scrapePortals(ctx: ScrapeContext): Promise<Snapshot> {
   const tables = new Map<string, ScrapedTable>();
-  const results = new Map<string, ProviderMatch>();
+  const candidates: ProviderMatch[] = [];
   const errors: string[] = [];
-  const rank = (s: ProviderMatch["status"]) => (s === "finished" ? 1 : s === "scheduled" ? 0 : 2);
 
   const sources = getSources();
   await mapLimit(sources, 5, async (source) => {
@@ -31,13 +56,10 @@ export async function scrapePortals(ctx: ScrapeContext): Promise<Snapshot> {
     }
     for (const html of pages) {
       for (const t of parseStandingsTables(html, ctx)) if ((tables.get(t.leagueId)?.rows.length ?? 0) < t.rows.length) tables.set(t.leagueId, t);
-      for (const m of parseResults(html, ctx)) {
-        const prev = results.get(m.externalId);
-        if (!prev || rank(m.status) > rank(prev.status)) results.set(m.externalId, m);
-      }
+      candidates.push(...parseResults(html, ctx));
     }
   });
-  return { at: Date.now(), tables, results: [...results.values()], errors };
+  return { at: Date.now(), tables, results: mergeCandidates(candidates), errors };
 }
 
 /**

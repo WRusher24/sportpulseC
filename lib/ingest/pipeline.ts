@@ -62,7 +62,9 @@ export async function runIngestion(opts: IngestOptions): Promise<IngestReport> {
   const deadline = started + (opts.budgetMs ?? 50_000);
   const { repo } = opts;
   const sources = opts.sources ?? getSources();
-  const perSource = opts.maxPerSource ?? 10;
+  // First run on an empty store backfills deeper so the infinite-scroll timeline has real depth immediately.
+  const empty = (await repo.listThreads({ limit: 1 })).length === 0;
+  const perSource = opts.maxPerSource ?? (empty ? 30 : 15);
 
   const teams = await repo.listTeams();
   const aliasIndex = buildAliasIndex(teams);
@@ -105,6 +107,8 @@ export async function runIngestion(opts: IngestOptions): Promise<IngestReport> {
     const report = reports.find((r) => r.source === source.key) as SourceReport;
     const ex = extracted[i];
     const page = ex.ok ? ex.value : null;
+    // Skipped (not stored) when the time budget ran out, so the article is retried in full on the next cycle.
+    if (!ex.ok && ex.error instanceof Error && ex.error.message === "time budget exhausted") continue;
     if (!ex.ok) report.errors.push(`${item.url}: ${ex.error instanceof Error ? ex.error.message : String(ex.error)}`);
 
     const fullText = page?.text && page.text.length > 120 ? page.text : item.description;

@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import { apiFetch } from "@/lib/client/api";
 import type { TickerItem } from "@/lib/sports/types";
-import { Score } from "./Score";
+import { MatchScore } from "./MatchScore";
 import { StatusBadge } from "./StatusBadge";
 
 /** Real-time score ticker. Polls /api/live every 20 seconds (only while the tab is visible). */
@@ -60,7 +60,7 @@ export function LiveTicker({ initial }: { initial: TickerItem[] }) {
                 </div>
                 <div className="flex items-center justify-between gap-2">
                   <span className="min-w-0 flex-1 truncate text-sm font-semibold">{m.homeNameHe}</span>
-                  <Score home={m.homeScore} away={m.awayScore} size="md" />
+                  <MatchScore status={m.status} homeScore={m.homeScore} awayScore={m.awayScore} size="md" />
                   <span className="min-w-0 flex-1 truncate text-end text-sm font-semibold">{m.awayNameHe}</span>
                 </div>
               </div>

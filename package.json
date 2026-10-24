@@ -11,12 +11,14 @@
     "build": "next build",
     "start": "next start",
     "typecheck": "tsc --noEmit",
-    "test": "tsx --test tests/*.test.ts",
+    "test": "tsx --test tests/*.test.ts tests/*.test.tsx",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "tsx scripts/migrate.ts",
     "db:seed": "tsx scripts/seed.ts",
     "db:setup": "tsx scripts/prebuild.ts",
-    "vercel-build": "tsx scripts/prebuild.ts && next build"
+    "vercel-build": "tsx scripts/prebuild.ts && next build",
+    "verify:serverless": "node scripts/verify-serverless.mjs",
+    "audit:ui": "node scripts/audit-ui.mjs"
   },
   "dependencies": {
     "@neondatabase/serverless": "^1.2.0",

@@ -18,7 +18,7 @@ export function FormPills({ form }: { form: string }) {
   );
 }
 
-export function StandingsTable({ rows, teams, sport, highlight, zones }: { rows: StandingDTO[]; teams: Map<string, TeamDTO>; sport: SportType; highlight?: string | null; zones?: { top: number; bottom: number } }) {
+export function StandingsTable({ rows, teams, sport, highlight, zones }: { rows: Array<StandingDTO & { liveResult?: "W" | "D" | "L" | null; positionChange?: number }>; teams: Map<string, TeamDTO>; sport: SportType; highlight?: string | null; zones?: { top: number; bottom: number } }) {
   const football = sport === "football";
   return (
     <div className="overflow-x-auto rounded-2xl border border-line/60 bg-surface">
@@ -44,7 +44,11 @@ export function StandingsTable({ rows, teams, sport, highlight, zones }: { rows:
             return (
               <tr key={r.teamId} className={`border-t border-line/40 border-s-4 ${zone} ${highlight === r.teamId ? "bg-accent/15 font-semibold" : ""}`}>
                 <td className="py-2.5 ps-3 text-start"><span className="num">{fmtNum(r.position)}</span></td>
-                <td className="py-2.5 text-start">{t?.nameHe ?? r.teamId}</td>
+                <td className="py-2.5 text-start">
+                  {t?.nameHe ?? r.teamId}
+                  {r.liveResult && <span className="ms-2 inline-flex items-center gap-1 text-[10px] font-bold text-live" title="משחק בשידור חי נספר בטבלה"><span className="h-1.5 w-1.5 animate-pulseDot rounded-full bg-live" aria-hidden />חי</span>}
+                  {r.positionChange ? <span className={`ms-1 text-[10px] font-bold ${r.positionChange > 0 ? "text-good" : "text-bad"}`} aria-label={r.positionChange > 0 ? `עלייה של ${Math.abs(r.positionChange)} מקומות` : `ירידה של ${Math.abs(r.positionChange)} מקומות`}>{r.positionChange > 0 ? "▲" : "▼"}<span className="num">{fmtNum(Math.abs(r.positionChange))}</span></span> : null}
+                </td>
                 <td className="px-1 text-center"><span className="num">{fmtNum(r.played)}</span></td>
                 <td className="px-1 text-center"><span className="num">{fmtNum(r.wins)}</span></td>
                 {football && <td className="px-1 text-center"><span className="num">{fmtNum(r.draws)}</span></td>}

@@ -1,6 +1,8 @@
 import Link from "next/link";
+import { AutoRefresh } from "@/components/AutoRefresh";
 import { LiveTicker } from "@/components/LiveTicker";
 import { MatchRow } from "@/components/MatchRow";
+import { projectLiveTable } from "@/lib/analytics/live-table";
 import { StandingsTable } from "@/components/StandingsTable";
 import { getRepo } from "@/lib/data";
 import { fmtDate, fmtShortDate, israelDayKey } from "@/lib/format";
@@ -15,7 +17,7 @@ export const metadata = { title: "משחקים וטבלאות" };
 
 const DAY = 86_400_000;
 
-export default async function MatchCenterPage({ searchParams }: { searchParams: Promise<{ tab?: string; league?: string; day?: string }> }) {
+export default async function MatchCenterPage({ searchParams }: { searchParams: Promise<{ tab?: string; league?: string; day?: string; official?: string }> }) {
   const sp = await searchParams;
   const repo = getRepo();
   const tab = sp.tab === "tables" ? "tables" : "fixtures";
@@ -25,7 +27,7 @@ export default async function MatchCenterPage({ searchParams }: { searchParams: 
   const leagueId = leagues.some((l) => l.id === sp.league) ? sp.league : undefined;
 
   const href = (patch: Record<string, string | undefined>) => {
-    const p = new URLSearchParams({ tab, ...(leagueId ? { league: leagueId } : {}), ...(sp.day ? { day: sp.day } : {}) });
+    const p = new URLSearchParams({ tab, ...(leagueId ? { league: leagueId } : {}), ...(sp.day ? { day: sp.day } : {}), ...(sp.official ? { official: sp.official } : {}) });
     for (const [k, v] of Object.entries(patch)) (v ? p.set(k, v) : p.delete(k));
     return `/match-center?${p}`;
   };
@@ -46,7 +48,7 @@ export default async function MatchCenterPage({ searchParams }: { searchParams: 
       {tab === "fixtures" ? (
         <Fixtures leagues={leagues} teams={teams} leagueId={leagueId} day={sp.day} href={href} repoLoad={(from, to, lid) => repo.listMatches({ from, to, leagueId: lid })} />
       ) : (
-        <Tables leagues={leagues} teams={teams} leagueId={leagueId} href={href} getRows={(id) => repo.getStandings(id)} favoriteTeam={favorite ? teams.get(favorite) : undefined} />
+        <Tables leagues={leagues} teams={teams} leagueId={leagueId} href={href} getRows={(id) => repo.getStandings(id)} getLive={(id) => repo.listMatches({ leagueId: id, status: ["first_half", "half_time", "second_half", "extra_time"] })} official={sp.official === "1"} favoriteTeam={favorite ? teams.get(favorite) : undefined} />
       )}
     </>
   );
@@ -72,8 +74,10 @@ async function Fixtures({ leagues, teams, leagueId, day, href, repoLoad }: { lea
   const byLeague = new Map<string, MatchDTO[]>();
   for (const m of matches) byLeague.set(m.leagueId, [...(byLeague.get(m.leagueId) ?? []), m]);
 
+  const anyLive = matches.some((m) => ["first_half", "half_time", "second_half", "extra_time"].includes(m.status));
   return (
     <>
+      <AutoRefresh enabled={anyLive} seconds={30} />
       <div className="scroll-x mb-3" role="group" aria-label="בחירת יום">
         {days.map((d, i) => (
           <Link key={keys[i]} href={href({ day: keys[i] === today ? undefined : keys[i] })} className="chip flex-col !py-1.5 text-center leading-tight" aria-pressed={selected === keys[i]}>
@@ -99,17 +103,30 @@ async function Fixtures({ leagues, teams, leagueId, day, href, repoLoad }: { lea
   );
 }
 
-async function Tables({ leagues, teams, leagueId, href, getRows, favoriteTeam }: { leagues: LeagueDTO[]; teams: Map<string, TeamDTO>; leagueId?: string; href: (p: Record<string, string | undefined>) => string; getRows: ReturnType<typeof getRepo>["getStandings"]; favoriteTeam?: TeamDTO }) {
+async function Tables({ leagues, teams, leagueId, href, getRows, getLive, official, favoriteTeam }: { leagues: LeagueDTO[]; teams: Map<string, TeamDTO>; leagueId?: string; href: (p: Record<string, string | undefined>) => string; getRows: ReturnType<typeof getRepo>["getStandings"]; getLive: (leagueId: string) => Promise<MatchDTO[]>; official: boolean; favoriteTeam?: TeamDTO }) {
   const withTables: LeagueDTO[] = [];
   for (const l of leagues) if ((await getRows(l.id)).length > 0) withTables.push(l);
   const current = withTables.find((l) => l.id === leagueId) ?? withTables.find((l) => l.id === favoriteTeam?.leagueId) ?? withTables[0];
   if (!current) return <p className="card text-sm text-muted">אין טבלאות זמינות.</p>;
-  const rows = await getRows(current.id);
+  const official_ = await getRows(current.id);
+  const liveMatches = official ? [] : await getLive(current.id);
+  const rows = projectLiveTable(official_, liveMatches, current.sportType, current.id);
+  const liveCount = liveMatches.filter((m) => m.homeScore !== null).length;
   const zones = current.sportType === "football" ? { top: current.id === "il-premier" ? 6 : current.id === "il-leumit" ? 2 : 4, bottom: current.id === "il-premier" ? 2 : 3 } : undefined;
   return (
     <>
+      <AutoRefresh enabled={liveCount > 0} seconds={30} />
       <LeagueChips leagues={withTables} current={current.id} href={href} all={false} />
-      <h2 className="mb-2 font-bold">{current.nameHe} · עונת {current.season}</h2>
+      <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+        <h2 className="font-bold">{current.nameHe} · עונת {current.season}</h2>
+        {liveCount > 0 ? (
+          <Link href={href({ official: "1" })} className="chip !min-h-[30px] border-live text-live" title="מעבר לטבלה הרשמית">
+            <span className="me-1.5 h-2 w-2 animate-pulseDot rounded-full bg-live" aria-hidden />טבלה בזמן אמת · {liveCount} משחקים חיים
+          </Link>
+        ) : official ? (
+          <Link href={href({ official: undefined })} className="chip !min-h-[30px]">חזרה לטבלה בזמן אמת</Link>
+        ) : null}
+      </div>
       <StandingsTable rows={rows} teams={teams} sport={current.sportType} highlight={favoriteTeam?.id} zones={zones} />
     </>
   );

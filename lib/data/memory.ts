@@ -13,6 +13,7 @@ import type {
   TeamDTO,
   ThreadDTO
 } from "@/lib/types";
+import { normalizeMatchState } from "./normalize";
 import type { ClusterCandidate, MatchQuery, NewArticle, RatingInput, Repo, ThreadQuery, UserRecord } from "./repo";
 
 type ThreadRow = Omit<ThreadDTO, "articles"> & { signature: string };
@@ -70,8 +71,12 @@ export class MemoryRepo implements Repo {
           this.articles.some((a) => a.threadId === t.id && (a.originalTitle.toLowerCase().includes(needle) || a.neutralTitle.toLowerCase().includes(needle)))
       );
     }
-    rows.sort((a, b) => b.lastPublishedAt.localeCompare(a.lastPublishedAt));
-    return rows.slice(q.offset ?? 0, (q.offset ?? 0) + q.limit).map((t) => this.withArticles(t));
+    rows.sort((a, b) => b.lastPublishedAt.localeCompare(a.lastPublishedAt) || b.id.localeCompare(a.id));
+    if (q.before) {
+      const { at, id } = q.before;
+      rows = rows.filter((t) => t.lastPublishedAt < at || (t.lastPublishedAt === at && t.id < id));
+    }
+    return rows.slice(0, q.limit).map((t) => this.withArticles(t));
   }
 
   async getThread(id: string) {
@@ -84,7 +89,7 @@ export class MemoryRepo implements Repo {
   }
 
   async listMatches(q: MatchQuery) {
-    let rows = [...this.matches];
+    let rows = this.matches.map((m) => normalizeMatchState(m));
     rows = rows.filter((m) => {
       if (q.leagueId && m.leagueId !== q.leagueId) return false;
       if (q.teamId && m.homeTeamId !== q.teamId && m.awayTeamId !== q.teamId) return false;
@@ -101,7 +106,7 @@ export class MemoryRepo implements Repo {
   async getMatch(id: string) {
     const m = this.matches.find((x) => x.id === id);
     if (!m) return null;
-    return { match: m, events: this.events.filter((e) => e.matchId === id).sort((a, b) => a.minute - b.minute) };
+    return { match: normalizeMatchState(m), events: this.events.filter((e) => e.matchId === id).sort((a, b) => a.minute - b.minute) };
   }
 
   async getStandings(leagueId: string) {

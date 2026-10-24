@@ -2,7 +2,7 @@ import type { Repo } from "@/lib/data/repo";
 import { runIngestion, type IngestReport } from "@/lib/ingest/pipeline";
 import type { Credentials } from "@/lib/server/credentials";
 import { providerFor } from "@/lib/sports/factory";
-import { hasActiveMatches, leaguesDueForSync, syncLeague, syncLive } from "@/lib/sports/sync";
+import { hasActiveMatches, leaguesDueForSync, syncFinishedDetails, syncLeague, syncLive } from "@/lib/sports/sync";
 
 export type MaintenanceReport = { news: IngestReport; sports: Record<string, unknown> };
 
@@ -28,6 +28,7 @@ export async function runMaintenance(opts: { repo: Repo; creds: Credentials; bud
         (sports.fixtures as unknown[]).push({ league: l.id, ...(await syncLeague(repo, provider, l)) });
       }
       if (Date.now() - started < budget - 3_000 && (await hasActiveMatches(repo))) sports.live = await syncLive(repo, provider, leagues);
+      if (Date.now() - started < budget - 3_000) sports.details = await syncFinishedDetails(repo, provider, leagues);
     }
   } catch (e) {
     sports.error = e instanceof Error ? e.message : String(e);
