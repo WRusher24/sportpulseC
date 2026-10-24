@@ -199,7 +199,7 @@ test("Gemini and custom OpenAI-compatible providers resolve with the right prece
   try {
     assert.equal(resolveCredentials().ai.provider, null);
     process.env.GEMINI_API_KEY = "env-gemini-key-1234";
-    assert.deepEqual([resolveCredentials().ai.provider, resolveCredentials().ai.source, resolveCredentials().ai.model], ["gemini", "env", "gemini-2.5-flash"]);
+    assert.deepEqual([resolveCredentials().ai.provider, resolveCredentials().ai.source, resolveCredentials().ai.model], ["gemini", "env", "gemini-3.8-flash"]);
     const picked = resolveCredentials({ requestKeys: { aiProvider: "openai", openaiKey: "browser-openai-1234", geminiKey: "browser-gemini-1234" } });
     assert.deepEqual([picked.ai.provider, picked.ai.apiKey], ["openai", "browser-openai-1234"]);
     const custom = resolveCredentials({ requestKeys: { aiProvider: "custom", customBaseUrl: "https://llm.example.com/v1/", customModel: "llama3.1:8b" } });
@@ -273,4 +273,29 @@ test("provider chain falls through failures and empty answers", async () => {
   const row = { externalId: "x", leagueExternalId: null, homeName: "a", awayName: "b", homeScore: null, awayScore: null, status: "scheduled" as const, minute: null, kickoff: "2026-10-24T10:00:00Z", venue: null, round: null };
   const chain = new ChainProvider([mk("espn", async () => { throw new Error("down"); }), mk("portals", async () => []), mk("api-football", async () => [row])]);
   assert.equal((await chain.fixtures(league, "2026-10-24", "2026-10-25")).length, 1);
+});
+
+test("Gemini: a retired default model is replaced by the newest Flash model and the request is retried", async () => {
+  const { complete } = await import("../lib/ai/client");
+  const calls: string[] = [];
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = (async (input: any) => {
+    const url = String(input);
+    calls.push(url);
+    if (url.includes("/models?pageSize")) return new Response(JSON.stringify({ models: [{ name: "models/gemini-2.5-flash", supportedGenerationMethods: ["generateContent"] }, { name: "models/gemini-3.8-flash", supportedGenerationMethods: ["generateContent"] }, { name: "models/gemini-3.8-flash-lite", supportedGenerationMethods: ["generateContent"] }, { name: "models/gemini-4.0-flash", supportedGenerationMethods: ["embedContent"] }] }), { status: 200 });
+    if (url.includes("gemini-old-flash")) return new Response(JSON.stringify({ error: { message: "This model is no longer available" } }), { status: 404 });
+    return new Response(JSON.stringify({ candidates: [{ content: { parts: [{ text: "שלום" }] } }] }), { status: 200 });
+  }) as typeof fetch;
+  try {
+    const ai = { provider: "gemini" as const, apiKey: "key-for-retry-test-1", model: "gemini-old-flash", modelExplicit: false, baseUrl: null, source: "env" as const };
+    assert.equal(await complete(ai, { system: "s", messages: [{ role: "user", content: "hi" }] }), "שלום");
+    assert.ok(calls.some((u) => u.includes("gemini-3.8-flash:generateContent")));
+    const before = calls.length;
+    await complete(ai, { system: "s", messages: [{ role: "user", content: "again" }] });
+    assert.equal(calls.length - before, 1, "discovered model is cached");
+    // an explicitly chosen model is never silently replaced
+    await assert.rejects(complete({ ...ai, apiKey: "key-explicit-model-1", modelExplicit: true }, { system: "s", messages: [{ role: "user", content: "x" }] }));
+  } finally {
+    globalThis.fetch = realFetch;
+  }
 });

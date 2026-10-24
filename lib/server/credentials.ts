@@ -9,6 +9,8 @@ export type Credentials = {
     provider: AiProviderId | null;
     apiKey: string | null;
     model: string;
+    /** true when the model was chosen by the user/operator (never auto-replaced). */
+    modelExplicit: boolean;
     /** Only for provider "custom": OpenAI-compatible base URL. */
     baseUrl: string | null;
     source: CredentialSource;
@@ -29,7 +31,7 @@ const defaultModel = (p: AiProviderId): string => {
     case "anthropic":
       return process.env.ANTHROPIC_MODEL || "claude-haiku-5-5";
     case "gemini":
-      return process.env.GEMINI_MODEL || "gemini-2.5-flash";
+      return process.env.GEMINI_MODEL || "gemini-3.8-flash";
     default:
       return process.env.CUSTOM_AI_MODEL || "default";
   }
@@ -103,8 +105,10 @@ export function resolveCredentials(opts: { requestKeys?: UserKeys; accountKeys?:
   if (wanted === "sportmonks" && !sportmonksToken) sportsProvider = "auto";
   const paidSource: CredentialSource = apiFootballKey || sportmonksToken ? (football.value || basketball.value ? football.from : monks.value ? monks.from : "env") : "none";
 
+  const modelExplicit = Boolean(pick("aiModel").value || (provider === "custom" && pick("customModel").value) || (provider === "gemini" && env("GEMINI_MODEL")));
+
   return {
-    ai: { provider, apiKey: provider ? usable[provider].key : null, model, baseUrl: provider === "custom" ? ((customUrl.value ?? envCustomUrl) as string).replace(/\/+$/, "") : null, source: provider ? usable[provider].from : "none" },
+    ai: { provider, modelExplicit, apiKey: provider ? usable[provider].key : null, model, baseUrl: provider === "custom" ? ((customUrl.value ?? envCustomUrl) as string).replace(/\/+$/, "") : null, source: provider ? usable[provider].from : "none" },
     sports: { provider: sportsProvider, apiFootballKey, apiBasketballKey, sportmonksToken, source: paidSource }
   };
 }

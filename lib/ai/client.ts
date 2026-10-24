@@ -74,6 +74,38 @@ function request(ai: ReadyAi, o: CompleteOptions, stream: boolean): { url: strin
   };
 }
 
+const geminiModelCache = new Map<string, { model: string; at: number }>();
+const GEMINI_CACHE_MS = 6 * 3_600_000;
+
+/** Highest-versioned stable Flash model that supports generateContent for this key (Google retires model names often). */
+async function discoverGeminiModel(apiKey: string): Promise<string | null> {
+  const res = await fetch("https://generativelanguage.googleapis.com/v1beta/models?pageSize=200", { headers: { "x-goog-api-key": apiKey }, signal: AbortSignal.timeout(10_000), cache: "no-store" });
+  if (!res.ok) return null;
+  const data = (await res.json()) as { models?: Array<{ name: string; supportedGenerationMethods?: string[] }> };
+  const flash = (data.models ?? [])
+    .filter((m) => m.supportedGenerationMethods?.includes("generateContent"))
+    .flatMap((m) => {
+      const hit = /^models\/(gemini-(\d+(?:\.\d+)?)-flash)$/.exec(m.name);
+      return hit ? [{ id: hit[1], v: Number(hit[2]) }] : [];
+    })
+    .sort((a, b) => b.v - a.v);
+  return flash[0]?.id ?? null;
+}
+
+/** Sends the request; if Gemini rejects a non-pinned model name (404 / retired), discovers the current Flash model and retries once. */
+async function send(ai: ReadyAi, o: CompleteOptions, stream: boolean): Promise<Response> {
+  const cached = ai.provider === "gemini" && !ai.modelExplicit ? geminiModelCache.get(ai.apiKey as string) : undefined;
+  const active: ReadyAi = cached && Date.now() - cached.at < GEMINI_CACHE_MS ? { ...ai, model: cached.model } : ai;
+  const { url, init } = request(active, o, stream);
+  const res = await fetch(url, safeInit(active, init));
+  if (res.ok || ai.provider !== "gemini" || ai.modelExplicit || (res.status !== 404 && res.status !== 400)) return res;
+  const model = await discoverGeminiModel(ai.apiKey as string).catch(() => null);
+  if (!model || model === active.model) return res;
+  geminiModelCache.set(ai.apiKey as string, { model, at: Date.now() });
+  const retry = request({ ...ai, model }, o, stream);
+  return fetch(retry.url, retry.init);
+}
+
 /** Custom endpoints may be user-supplied: never follow redirects (they could point at internal hosts). */
 const safeInit = (ai: ReadyAi, init: RequestInit): RequestInit => (ai.provider === "custom" ? { ...init, redirect: "error" } : init);
 
@@ -93,8 +125,7 @@ async function fail(res: Response): Promise<never> {
 /** One-shot completion. Throws AiError on provider failure. */
 export async function complete(ai: AiConfig, o: CompleteOptions): Promise<string> {
   if (!hasAi(ai)) throw new AiError("לא הוגדר מפתח AI", 400);
-  const { url, init } = request(ai, o, false);
-  const res = await fetch(url, safeInit(ai, init));
+  const res = await send(ai, o, false);
   if (!res.ok) await fail(res);
   const data = (await res.json()) as {
     choices?: Array<{ message?: { content?: string } }>;
@@ -109,8 +140,7 @@ export async function complete(ai: AiConfig, o: CompleteOptions): Promise<string
 /** Streams text deltas (SSE) from either provider. */
 export async function* streamCompletion(ai: AiConfig, o: CompleteOptions): AsyncGenerator<string> {
   if (!hasAi(ai)) throw new AiError("לא הוגדר מפתח AI", 400);
-  const { url, init } = request(ai, o, true);
-  const res = await fetch(url, safeInit(ai, init));
+  const res = await send(ai, o, true);
   if (!res.ok) await fail(res);
   if (!res.body) throw new AiError("תגובה ריקה מספק ה-AI", 502);
   const reader = res.body.getReader();

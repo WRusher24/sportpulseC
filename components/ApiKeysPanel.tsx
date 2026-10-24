@@ -9,7 +9,7 @@ import { useKeys } from "./KeysProvider";
 type Status = { ai: { provider: string | null; model: string; source: string }; sports: { provider: string; source: string } };
 const SECRET_FIELDS = ["openaiKey", "anthropicKey", "geminiKey", "customKey", "apiFootballKey", "apiBasketballKey", "sportmonksToken"] as const;
 const MODEL_HINTS: Record<string, string[]> = {
-  gemini: ["gemini-2.5-flash", "gemini-2.5-pro"],
+  gemini: ["gemini-3.8-flash"],
   openai: ["gpt-4o-mini", "gpt-4o"],
   anthropic: ["claude-haiku-5-5", "claude-sonnet-5-5"],
   custom: []

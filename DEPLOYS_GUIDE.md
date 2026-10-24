@@ -91,7 +91,7 @@ Scraping notes: the user-agent identifies the bot, requests have timeouts/size c
 
 ### AI providers
 
-Gemini, OpenAI, Anthropic and any OpenAI-compatible endpoint are first-class. Gemini 1.5 models have been retired by Google, so the defaults are `gemini-2.5-flash` / `-pro`; any model id can be typed in Settings. User-supplied custom endpoints must be public HTTPS (localhost, private IPs and redirects are refused to prevent SSRF); the operator-controlled `CUSTOM_AI_BASE_URL` variable may point anywhere.
+Gemini, OpenAI, Anthropic and any OpenAI-compatible endpoint are first-class. Gemini 1.5 models have been retired by Google, so the defaults are `gemini-3.8-flash` / `-pro`; any model id can be typed in Settings. User-supplied custom endpoints must be public HTTPS (localhost, private IPs and redirects are refused to prevent SSRF); the operator-controlled `CUSTOM_AI_BASE_URL` variable may point anywhere.
 
 ## 6. Local development
 
