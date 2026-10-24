@@ -2,7 +2,10 @@ import type { EventType, LeagueDTO, LineUps, MatchStats, MatchStatus } from "@/l
 
 export type ProviderMatch = {
   externalId: string;
+  /** Numeric id in the provider's own catalogue (paid APIs). */
   leagueExternalId: number | null;
+  /** Our league id when the provider already knows it (ESPN, portal scraping). */
+  leagueId?: string;
   homeName: string;
   awayName: string;
   homeScore: number | null;
@@ -32,7 +35,12 @@ export type ProviderDetail = { events: ProviderEvent[]; stats: MatchStats | null
 
 /** Strongly typed contract implemented by every live-data adapter. */
 export interface SportsProvider {
-  readonly id: "api-football" | "sportmonks";
+  readonly id: "api-football" | "sportmonks" | "espn" | "portals" | "auto";
+  /** true: the live ticker may query this provider on every request (paid key, own quota). false: serve from the synced store. */
+  readonly liveDirect: boolean;
+  /** Minimum time between fixture/standings syncs of one league. */
+  readonly refreshMs: number;
+  supports(league: LeagueDTO): boolean;
   liveMatches(leagues: LeagueDTO[]): Promise<ProviderMatch[]>;
   fixtures(league: LeagueDTO, fromDay: string, toDay: string): Promise<ProviderMatch[]>;
   standings(league: LeagueDTO): Promise<ProviderStanding[]>;

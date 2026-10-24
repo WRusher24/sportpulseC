@@ -34,6 +34,22 @@ function occurs(haystack: string, alias: string): number {
   }
 }
 
+export type Mention = { at: number; alias: string; teams: TeamDTO[] };
+
+/** Distinct team-name mentions in order of appearance (clubs sharing a name, e.g. football/basketball, form one mention). */
+export function findMentions(index: AliasEntry[], text: string): Mention[] {
+  let rest = normalize(text);
+  const groups = new Map<string, TeamDTO[]>();
+  for (const { alias, team } of index) groups.set(alias, [...(groups.get(alias) ?? []), team]);
+  const out: Mention[] = [];
+  for (const alias of [...groups.keys()].sort((a, b) => b.length - a.length)) {
+    if (occurs(rest, alias) === 0) continue;
+    out.push({ at: rest.indexOf(alias), alias, teams: groups.get(alias) as TeamDTO[] });
+    rest = rest.split(alias).join(" ".repeat(alias.length));
+  }
+  return out.sort((a, b) => a.at - b.at);
+}
+
 /** Ranks every team mentioned in the text (headline weighs 3x, first 600 characters of the body 1x). */
 export function rankTeams(index: AliasEntry[], title: string, text: string): Array<{ team: TeamDTO; score: number }> {
   const t = normalize(title);

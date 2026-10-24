@@ -3,11 +3,19 @@
 import { useEffect, useState, useTransition } from "react";
 import { clearAccountKeysAction, syncKeysToAccountAction } from "@/app/actions";
 import { apiFetch } from "@/lib/client/api";
-import { KEY_PATTERN, keysToHeaders, sanitizeUserKeys, type UserKeys } from "@/lib/keys";
+import { KEY_PATTERN, keysToHeaders, safePublicHttpsUrl, sanitizeUserKeys, type UserKeys } from "@/lib/keys";
 import { useKeys } from "./KeysProvider";
 
 type Status = { ai: { provider: string | null; model: string; source: string }; sports: { provider: string; source: string } };
-const SECRET_FIELDS = ["openaiKey", "anthropicKey", "apiFootballKey", "apiBasketballKey", "sportmonksToken"] as const;
+const SECRET_FIELDS = ["openaiKey", "anthropicKey", "geminiKey", "customKey", "apiFootballKey", "apiBasketballKey", "sportmonksToken"] as const;
+const MODEL_HINTS: Record<string, string[]> = {
+  gemini: ["gemini-2.5-flash", "gemini-2.5-pro"],
+  openai: ["gpt-4o-mini", "gpt-4o"],
+  anthropic: ["claude-haiku-5-5", "claude-sonnet-5-5"],
+  custom: []
+};
+const SPORTS_NAME: Record<string, string> = { auto: "אוטומטי חינמי (ESPN + פורטלים)", espn: "ESPN (חינמי)", portals: "סריקת פורטלים (חינמי)", "api-football": "API-Football", sportmonks: "Sportmonks", mock: "ללא נתונים חיים" };
+const PROVIDER_NAME: Record<string, string> = { openai: "OpenAI", anthropic: "Anthropic", gemini: "Google Gemini", custom: "Custom endpoint" };
 type Check = { ok: boolean; message: string } | null;
 
 const SOURCE_HE: Record<string, string> = { user: "מפתח אישי בדפדפן", account: "מפתח מסונכרן בחשבון", env: "משתנה סביבה של המערכת", none: "לא הוגדר" };
@@ -39,7 +47,8 @@ export function ApiKeysPanel({ signedIn, hasAccountKeys }: { signedIn: boolean; 
   useEffect(() => { if (ready) refreshStatus(); }, [ready, keys]);
 
   const set = <K extends keyof UserKeys>(k: K, v: UserKeys[K] | "") => setForm((f) => { const next = { ...f }; if (v === "" || v === undefined) delete next[k]; else next[k] = v as UserKeys[K]; return next; });
-  const invalid = SECRET_FIELDS.some((f) => Boolean(form[f]) && !KEY_PATTERN.test(form[f] as string));
+  const customUrlBad = Boolean(form.customBaseUrl) && !safePublicHttpsUrl(form.customBaseUrl);
+  const invalid = customUrlBad || SECRET_FIELDS.some((f) => Boolean(form[f]) && !KEY_PATTERN.test(form[f] as string));
 
   const onSave = () => start(async () => {
     try {
@@ -70,8 +79,8 @@ export function ApiKeysPanel({ signedIn, hasAccountKeys }: { signedIn: boolean; 
 
       {status && (
         <ul className="grid gap-2 text-sm sm:grid-cols-2" aria-label="מצב חיבורים נוכחי">
-          <li className="rounded-xl border border-line/60 p-3"><span className="block text-xs text-muted">מנוע AI</span><b>{status.ai.provider ? `${status.ai.provider === "openai" ? "OpenAI" : "Anthropic"} · ${status.ai.model}` : "לא מחובר – מצב ניתוח נתונים"}</b><span className="block text-xs text-muted">מקור: {SOURCE_HE[status.ai.source]}</span></li>
-          <li className="rounded-xl border border-line/60 p-3"><span className="block text-xs text-muted">נתוני ספורט חיים</span><b>{status.sports.provider === "mock" ? "לא מחובר – טבלאות פתיחה בלבד" : status.sports.provider}</b><span className="block text-xs text-muted">מקור: {SOURCE_HE[status.sports.source]}</span></li>
+          <li className="rounded-xl border border-line/60 p-3"><span className="block text-xs text-muted">מנוע AI</span><b>{status.ai.provider ? `${PROVIDER_NAME[status.ai.provider]} · ${status.ai.model}` : "לא מחובר – מצב ניתוח נתונים"}</b><span className="block text-xs text-muted">מקור: {SOURCE_HE[status.ai.source]}</span></li>
+          <li className="rounded-xl border border-line/60 p-3"><span className="block text-xs text-muted">נתוני ספורט חיים</span><b>{SPORTS_NAME[status.sports.provider] ?? status.sports.provider}</b><span className="block text-xs text-muted">{status.sports.source === "none" ? "ללא מפתח בתשלום" : `מפתח בתשלום: ${SOURCE_HE[status.sports.source]}`}</span></li>
         </ul>
       )}
 
@@ -79,37 +88,70 @@ export function ApiKeysPanel({ signedIn, hasAccountKeys }: { signedIn: boolean; 
         <legend className="px-1 text-sm font-bold">בינה מלאכותית</legend>
         <div className="grid gap-3 sm:grid-cols-2">
           <div>
-            <label htmlFor="ai-provider" className="mb-1 block text-sm font-semibold">ספק מועדף</label>
+            <label htmlFor="ai-provider" className="mb-1 block text-sm font-semibold">ספק AI</label>
             <select id="ai-provider" className="input" value={form.aiProvider ?? ""} onChange={(e) => set("aiProvider", e.target.value as UserKeys["aiProvider"] | "")}>
-              <option value="">אוטומטי</option><option value="openai">OpenAI</option><option value="anthropic">Anthropic (Claude)</option>
+              <option value="">אוטומטי (ברירת מחדל של המערכת)</option>
+              <option value="gemini">Google Gemini (Flash / Pro)</option>
+              <option value="openai">OpenAI (GPT-4o / GPT-4o-mini)</option>
+              <option value="anthropic">Anthropic (Claude Sonnet / Haiku)</option>
+              <option value="custom">Custom / Local OpenAI-Compatible Endpoint</option>
             </select>
           </div>
           <div>
             <label htmlFor="ai-model" className="mb-1 block text-sm font-semibold">מודל (אופציונלי)</label>
-            <input id="ai-model" dir="ltr" className="input text-start font-mono" value={form.aiModel ?? ""} onChange={(e) => set("aiModel", e.target.value.trim())} placeholder="gpt-4o-mini / claude-haiku-5-5" />
+            <input id="ai-model" list="ai-model-list" dir="ltr" className="input text-start font-mono" value={form.aiModel ?? ""} onChange={(e) => set("aiModel", e.target.value.trim())} placeholder={MODEL_HINTS[form.aiProvider ?? ""]?.[0] ?? "ברירת מחדל לפי הספק"} autoComplete="off" />
+            <datalist id="ai-model-list">{(MODEL_HINTS[form.aiProvider ?? ""] ?? Object.values(MODEL_HINTS).flat()).map((m) => <option key={m} value={m} />)}</datalist>
           </div>
         </div>
+        <SecretField id="k-gemini" label="Gemini API Key" value={form.geminiKey ?? ""} onChange={(v) => set("geminiKey", v)} placeholder="AIza…" />
         <SecretField id="k-openai" label="OpenAI API Key" value={form.openaiKey ?? ""} onChange={(v) => set("openaiKey", v)} placeholder="sk-…" />
         <SecretField id="k-anthropic" label="Anthropic API Key" value={form.anthropicKey ?? ""} onChange={(v) => set("anthropicKey", v)} placeholder="sk-ant-…" />
+        <div className="space-y-3 rounded-lg bg-surface2/30 p-3">
+          <p className="text-sm font-semibold">Custom Endpoint (תואם OpenAI: Ollama, vLLM, LM Studio, OpenRouter, Groq…)</p>
+          <div>
+            <label htmlFor="k-custom-url" className="mb-1 block text-sm">Endpoint URL</label>
+            <input id="k-custom-url" dir="ltr" type="url" className="input text-start font-mono" value={form.customBaseUrl ?? ""} onChange={(e) => set("customBaseUrl", e.target.value.trim())} placeholder="https://my-gateway.example.com/v1" autoComplete="off" spellCheck={false} />
+            {customUrlBad && <p role="alert" className="mt-1 text-xs text-bad">הכתובת חייבת להיות HTTPS ציבורית (לא localhost או רשת פנימית).</p>}
+          </div>
+          <SecretField id="k-custom" label="Custom API Key (אופציונלי)" value={form.customKey ?? ""} onChange={(v) => set("customKey", v)} placeholder="Bearer token" />
+          <div>
+            <label htmlFor="k-custom-model" className="mb-1 block text-sm">שם המודל בשרת</label>
+            <input id="k-custom-model" dir="ltr" className="input text-start font-mono" value={form.customModel ?? ""} onChange={(e) => set("customModel", e.target.value.trim())} placeholder="llama3.1:8b" autoComplete="off" />
+          </div>
+          <p className="text-xs leading-5 text-muted">הקריאה מתבצעת מהשרת, ולכן שרת מקומי על המחשב שלכם (localhost) לא נגיש – חשפו אותו דרך כתובת HTTPS ציבורית (למשל tunnel). מפעילי האתר יכולים להגדיר כתובת פנימית במשתנה הסביבה CUSTOM_AI_BASE_URL.</p>
+        </div>
         <div className="flex flex-wrap items-center gap-3">
-          <button className="btn-ghost" onClick={() => test("ai")} disabled={pending}>בדיקת מפתח AI</button>
+          <button className="btn-ghost" onClick={() => test("ai")} disabled={pending}>בדיקת ספק AI</button>
           {aiCheck && <span role="status" className={`text-sm ${aiCheck.ok ? "text-good" : "text-bad"}`}>{aiCheck.message}</span>}
         </div>
       </fieldset>
 
       <fieldset className="space-y-3 rounded-xl border border-line/60 p-3">
         <legend className="px-1 text-sm font-bold">נתוני משחקים חיים</legend>
+        <p className="rounded-lg bg-accent/10 p-3 text-sm leading-6">
+          <b>אין צורך להזין כלום.</b> כברירת מחדל המערכת מושכת תוצאות, לוחות משחקים וטבלאות ממקורות חינמיים: ESPN (פרמייר ליג, לה ליגה, ליגת האלופות, NBA), ובנוסף סורקת אוטומטית את ספורט 5, ONE, ספורט 1, ידיעות ספורט ווואלה! ספורט (ליגת העל, לאומית, ליגת ווינר ועוד). מפתח בתשלום הוא אופציונלי בלבד ומקבל עדיפות.
+        </p>
         <div>
-          <label htmlFor="sp-provider" className="mb-1 block text-sm font-semibold">ספק נתונים</label>
+          <label htmlFor="sp-provider" className="mb-1 block text-sm font-semibold">מקור נתונים</label>
           <select id="sp-provider" className="input" value={form.sportsProvider ?? ""} onChange={(e) => set("sportsProvider", e.target.value as UserKeys["sportsProvider"] | "")}>
-            <option value="">אוטומטי (לפי המפתחות)</option><option value="api-football">API-Football (API-Sports)</option><option value="sportmonks">Sportmonks</option><option value="mock">ללא ספק חי</option>
+            <option value="">אוטומטי – חינמי (ESPN + סריקת פורטלים)</option>
+            <option value="espn">ESPN בלבד (חינמי)</option>
+            <option value="portals">סריקת פורטלי הספורט הישראליים בלבד (חינמי)</option>
+            <option value="api-football">API-Football (בתשלום)</option>
+            <option value="sportmonks">Sportmonks (בתשלום)</option>
+            <option value="mock">ללא נתונים חיים</option>
           </select>
         </div>
-        <SecretField id="k-apif" label="API-Football Key (כדורגל)" value={form.apiFootballKey ?? ""} onChange={(v) => set("apiFootballKey", v)} />
-        <SecretField id="k-apib" label="API-Basketball Key (כדורסל, אופציונלי – ברירת מחדל: אותו מפתח)" value={form.apiBasketballKey ?? ""} onChange={(v) => set("apiBasketballKey", v)} />
-        <SecretField id="k-sm" label="Sportmonks Token" value={form.sportmonksToken ?? ""} onChange={(v) => set("sportmonksToken", v)} />
+        <details className="rounded-lg border border-line/50 p-3">
+          <summary className="cursor-pointer text-sm font-semibold">מפתחות בתשלום (אופציונלי)</summary>
+          <div className="mt-3 space-y-3">
+            <SecretField id="k-apif" label="API-Football Key (כדורגל)" value={form.apiFootballKey ?? ""} onChange={(v) => set("apiFootballKey", v)} />
+            <SecretField id="k-apib" label="API-Basketball Key (כדורסל, ברירת מחדל: אותו מפתח)" value={form.apiBasketballKey ?? ""} onChange={(v) => set("apiBasketballKey", v)} />
+            <SecretField id="k-sm" label="Sportmonks Token" value={form.sportmonksToken ?? ""} onChange={(v) => set("sportmonksToken", v)} />
+          </div>
+        </details>
         <div className="flex flex-wrap items-center gap-3">
-          <button className="btn-ghost" onClick={() => test("sports")} disabled={pending}>בדיקת ספק נתונים</button>
+          <button className="btn-ghost" onClick={() => test("sports")} disabled={pending}>בדיקת מקור הנתונים</button>
           {sportsCheck && <span role="status" className={`text-sm ${sportsCheck.ok ? "text-good" : "text-bad"}`}>{sportsCheck.message}</span>}
         </div>
       </fieldset>

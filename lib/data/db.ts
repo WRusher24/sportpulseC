@@ -403,6 +403,11 @@ export class DbRepo implements Repo {
     await this.db.update(s.masterStoryThreads).set({ aiVibeScore: optimistic, vibeWorriedScore: worried }).where(eq(s.masterStoryThreads.id, threadId));
   }
 
+  async lastIngestAt() {
+    const [r] = await this.db.select({ t: sql<Date | null>`max(${s.ingestRuns.startedAt})` }).from(s.ingestRuns);
+    return r?.t ? new Date(r.t) : null;
+  }
+
   async logIngestRun(r: { startedAt: Date; fetched: number; inserted: number; report: Record<string, unknown> }) {
     await this.db.insert(s.ingestRuns).values({ startedAt: r.startedAt, finishedAt: new Date(), fetched: r.fetched, inserted: r.inserted, report: r.report });
   }

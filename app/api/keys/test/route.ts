@@ -3,7 +3,9 @@ import { z } from "zod";
 import { AiError, complete } from "@/lib/ai/client";
 import { clientIp, rateLimit } from "@/lib/server/ratelimit";
 import { credentialsForRequest } from "@/lib/server/request-credentials";
+import { EspnProvider } from "@/lib/sports/espn";
 import { getJson } from "@/lib/sports/http";
+import type { LeagueDTO } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 30;
@@ -20,7 +22,7 @@ export async function POST(req: Request) {
     if (parsed.data.target === "ai") {
       if (!creds.ai.provider) return NextResponse.json({ ok: false, message: "לא הוגדר מפתח AI" });
       await complete(creds.ai, { system: "Reply with the single word OK.", messages: [{ role: "user", content: "ping" }], maxTokens: 16 });
-      return NextResponse.json({ ok: true, message: `המפתח תקין (${creds.ai.provider}, מודל ${creds.ai.model}, מקור: ${sourceHe(creds.ai.source)})` });
+      return NextResponse.json({ ok: true, message: `החיבור תקין (${creds.ai.provider}, מודל ${creds.ai.model}, מקור: ${sourceHe(creds.ai.source)})` });
     }
     const s = creds.sports;
     if (s.provider === "api-football" && s.apiFootballKey) {
@@ -31,7 +33,9 @@ export async function POST(req: Request) {
       await getJson<unknown>(`https://api.sportmonks.com/v3/core/my/usage?api_token=${encodeURIComponent(s.sportmonksToken)}`, {}, 0);
       return NextResponse.json({ ok: true, message: `הטוקן של Sportmonks תקין (מקור: ${sourceHe(s.source)})` });
     }
-    return NextResponse.json({ ok: false, message: "לא הוגדר ספק נתונים חי – האפליקציה משתמשת בנתוני הבסיס" });
+    if (s.provider === "mock") return NextResponse.json({ ok: false, message: "נתונים חיים כבויים – בחרו מקור חינמי או ספק בתשלום" });
+    const table = await new EspnProvider().standings({ id: "epl", sportType: "football" } as LeagueDTO);
+    return NextResponse.json(table.length ? { ok: true, message: `המקור החינמי פעיל (ESPN החזיר ${table.length} קבוצות). סריקת הפורטלים הישראליים רצה ברקע ובודקת את עצמה בכל סבב.` } : { ok: false, message: "ESPN לא החזיר נתונים כרגע; המערכת תנסה את סריקת הפורטלים הישראליים" });
   } catch (e) {
     return NextResponse.json({ ok: false, message: e instanceof AiError || e instanceof Error ? e.message : "הבדיקה נכשלה" });
   }

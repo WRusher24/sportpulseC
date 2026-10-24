@@ -6,6 +6,8 @@ import { Header } from "@/components/Header";
 import { KeysProvider } from "@/components/KeysProvider";
 import { LiveNotifier } from "@/components/LiveNotifier";
 import { ThemeProvider } from "@/components/ThemeProvider";
+import { after } from "next/server";
+import { refreshIfStale } from "@/lib/jobs/lazy";
 import { getSessionUser } from "@/lib/server/session";
 import type { ThemeId } from "@/lib/types";
 import "./globals.css";
@@ -25,9 +27,12 @@ export const viewport: Viewport = {
   themeColor: "#0f172a"
 };
 
+export const maxDuration = 60;
+
 const THEMES: ThemeId[] = ["dark", "light", "pitch", "night"];
 
 export default async function RootLayout({ children }: { children: ReactNode }) {
+  after(refreshIfStale);
   const user = await getSessionUser();
   const cookieTheme = (await cookies()).get("sp_theme")?.value as ThemeId | undefined;
   const theme: ThemeId = cookieTheme && THEMES.includes(cookieTheme) ? cookieTheme : (user?.themePreference ?? "dark");

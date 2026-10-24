@@ -25,7 +25,7 @@ The bottom bar has five tabs: **חדשות** (feed), **משחקים וטבלאו
 * **טבלאות**: standings with played, wins, draws, losses, goal difference and points (basketball shows wins/losses and point difference).
 * Match view tabs: events timeline (goals, cards, substitutions, VAR), statistics (possession, shots, shots on target, corners, offsides, fouls, pass accuracy, xG), lineups, H2H and form guide, fan ratings, analyst insight.
 * The live ticker updates every 20 seconds and the match page refreshes while the game is live.
-* Scores and tables come from a sports data provider. Until one is connected (by the site admin, or by you in Settings) tables show an opening state with 0 games and no fixtures.
+* Scores, fixtures and tables are collected automatically from free public sources and the Israeli sports portals (no setup). Until the first successful collection, tables show an opening state with 0 games and no fixtures. Lineups, statistics and event timelines appear only when a paid data provider is connected.
 
 ## Rating players after the game
 
@@ -49,14 +49,16 @@ Pick your club (search by Hebrew or English name). The hub shows **מה חדש �
 
 ## API keys (Settings → מפתחות API)
 
-1. Open **הגדרות → מפתחות API**.
-2. Choose the AI provider (OpenAI or Anthropic), optionally a model, and paste the key. Paste a Sports Data key (API-Football, optional API-Basketball key, or a Sportmonks token) and pick the data provider.
-3. **שמירה מוצפנת במכשיר** stores the keys encrypted in your browser. **בדיקת מפתח** verifies a key before saving.
-4. Signed-in users may **sync keys to the account** (encrypted on the server) to use them on other devices, and remove them at any time.
-5. Priority: your browser key → your account key → the site's system key. The status cards show which source is active.
-6. **מחיקת כל המפתחות** wipes them from the device.
+**Live scores need no key.** By default the app pulls fixtures, results and tables from free sources (ESPN, plus automatic scanning of Sport5, ONE, Sport1, Ynet Sport and Walla Sport). Keys are optional upgrades:
 
-Keys are never shown in exports and are used only for your own requests.
+1. Open **הגדרות → מפתחות API**.
+2. **AI provider** dropdown: Auto (system default), Google Gemini, OpenAI, Anthropic, or Custom / OpenAI-compatible endpoint. Paste the matching key (Gemini, OpenAI, Anthropic) or, for a custom endpoint, its HTTPS URL, optional key and model name. Optionally type a model id.
+3. **Live data source** dropdown: Auto free (default), ESPN only, Israeli portals only, or a paid API (API-Football, Sportmonks) with its key under "מפתחות בתשלום".
+4. **שמירה מוצפנת במכשיר** stores the keys encrypted in your browser. **בדיקת ספק AI / בדיקת מקור הנתונים** verify them.
+5. Signed-in users may **sync keys to the account** (encrypted on the server) and remove them at any time.
+6. Priority: your browser key → your account key → the site's system key. The status cards show what is active. **מחיקת כל המפתחות** wipes them from the device.
+
+Keys are never included in exports and are used only for your own requests.
 
 ## Notifications and data export
 

@@ -6,9 +6,14 @@ import { TeamMatcher } from "./team-match";
 import type { ProviderMatch, SportsProvider, TickerItem } from "./types";
 
 const DAY = 86_400_000;
-const FIXTURE_REFRESH_MS = 6 * 3_600_000;
 
-export const externalMatchId = (leagueId: string, externalId: string) => `${leagueId}-x${externalId}`;
+const findLeague = (leagues: LeagueDTO[], pm: ProviderMatch) =>
+  pm.leagueId
+    ? leagues.find((l) => l.id === pm.leagueId)
+    : leagues.find((l) => pm.leagueExternalId !== null && (l.apiFootballId === pm.leagueExternalId || l.apiBasketballId === pm.leagueExternalId || l.sportmonksId === pm.leagueExternalId));
+
+/** URL-safe match id for provider matches. */
+export const externalMatchId = (leagueId: string, externalId: string) => `${leagueId}-x${externalId.replace(/[^A-Za-z0-9_-]/g, "-")}`;
 
 function toDto(league: LeagueDTO, pm: ProviderMatch, matcher: TeamMatcher, existing?: MatchDTO): MatchDTO | null {
   const home = matcher.find(pm.homeName, league.sportType, league.id);
@@ -73,7 +78,7 @@ export async function syncLive(repo: Repo, provider: SportsProvider, leagues: Le
   let details = 0;
   const upserts: MatchDTO[] = [];
   for (const pm of live) {
-    const league = leagues.find((l) => l.apiFootballId === pm.leagueExternalId || l.apiBasketballId === pm.leagueExternalId || l.sportmonksId === pm.leagueExternalId);
+    const league = findLeague(leagues, pm);
     if (!league) continue;
     const id = externalMatchId(league.id, pm.externalId);
     const current = (await repo.getMatch(id))?.match;
@@ -101,11 +106,10 @@ export async function syncLive(repo: Repo, provider: SportsProvider, leagues: Le
 }
 
 export async function leaguesDueForSync(repo: Repo, leagues: LeagueDTO[], provider: SportsProvider): Promise<LeagueDTO[]> {
-  const supported = leagues.filter((l) => (provider.id === "api-football" ? l.apiFootballId || l.apiBasketballId : l.sportmonksId));
   const due: LeagueDTO[] = [];
-  for (const l of supported) {
+  for (const l of leagues.filter((x) => provider.supports(x))) {
     const at = await repo.getLeagueSyncedAt(l.id);
-    if (!at || Date.now() - at.getTime() > FIXTURE_REFRESH_MS) due.push(l);
+    if (!at || Date.now() - at.getTime() > provider.refreshMs) due.push(l);
   }
   return due;
 }
@@ -141,12 +145,13 @@ export async function liveTicker(repo: Repo, provider: SportsProvider | null): P
       kickoff: m.matchTimestamp
     }));
 
-  if (!provider) return { items: await fromRepo(), source: "baseline" };
+  // Free providers (ESPN / portal scraping) are synced into the store by the background job; only paid keys are queried live.
+  if (!provider || !provider.liveDirect) return { items: await fromRepo(), source: provider ? "provider" : "baseline" };
   try {
     const matcher = new TeamMatcher(teams);
     const live = await provider.liveMatches(leagues);
     const items: TickerItem[] = live.map((pm) => {
-      const league = leagues.find((l) => l.apiFootballId === pm.leagueExternalId || l.apiBasketballId === pm.leagueExternalId || l.sportmonksId === pm.leagueExternalId);
+      const league = findLeague(leagues, pm);
       const home = matcher.find(pm.homeName, league?.sportType, league?.id);
       const away = matcher.find(pm.awayName, league?.sportType, league?.id);
       return {

@@ -246,8 +246,14 @@ export class MemoryRepo implements Repo {
     if (t) Object.assign(t, { vibeOptimistic: optimistic, vibeWorried: worried });
   }
 
+  private lastIngest: Date | null = null;
+
+  async lastIngestAt() {
+    return this.lastIngest;
+  }
+
   async logIngestRun() {
-    /* in-memory mode keeps no run history */
+    this.lastIngest = new Date();
   }
 
   async upsertMatches(ms: MatchDTO[]) {

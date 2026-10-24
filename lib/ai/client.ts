@@ -13,23 +13,49 @@ export class AiError extends Error {
   }
 }
 
-export const hasAi = (ai: AiConfig): ai is AiConfig & { provider: "openai" | "anthropic"; apiKey: string } => Boolean(ai.provider && ai.apiKey);
+type ReadyAi = AiConfig & { provider: NonNullable<AiConfig["provider"]> };
+
+/** A custom OpenAI-compatible gateway may be keyless; every other provider needs a key. */
+export const hasAi = (ai: AiConfig): ai is ReadyAi => Boolean(ai.provider && (ai.apiKey || (ai.provider === "custom" && ai.baseUrl)));
 
 type CompleteOptions = { system: string; messages: ChatMessage[]; json?: boolean; maxTokens?: number; signal?: AbortSignal };
 
-function request(ai: AiConfig & { provider: "openai" | "anthropic"; apiKey: string }, o: CompleteOptions, stream: boolean): { url: string; init: RequestInit } {
+function request(ai: ReadyAi, o: CompleteOptions, stream: boolean): { url: string; init: RequestInit } {
   const maxTokens = o.maxTokens ?? 1200;
   const signal = o.signal ?? AbortSignal.timeout(50_000);
-  if (ai.provider === "openai") {
+  if (ai.provider === "gemini") {
+    const method = stream ? "streamGenerateContent?alt=sse" : "generateContent";
     return {
-      url: "https://api.openai.com/v1/chat/completions",
+      url: `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(ai.model)}:${method}`,
       init: {
         method: "POST",
-        headers: { "content-type": "application/json", authorization: `Bearer ${ai.apiKey}` },
+        headers: { "content-type": "application/json", "x-goog-api-key": ai.apiKey as string },
+        body: JSON.stringify({
+          systemInstruction: { parts: [{ text: o.system }] },
+          contents: o.messages.map((m) => ({ role: m.role === "assistant" ? "model" : "user", parts: [{ text: m.content }] })),
+          // Gemini 2.5 spends part of the output budget on hidden "thinking": give headroom and turn it off on Flash models.
+          generationConfig: {
+            maxOutputTokens: maxTokens * 3 + 512,
+            ...(/flash/i.test(ai.model) ? { thinkingConfig: { thinkingBudget: 0 } } : {}),
+            ...(o.json ? { responseMimeType: "application/json" } : {})
+          }
+        }),
+        signal
+      }
+    };
+  }
+  if (ai.provider === "openai" || ai.provider === "custom") {
+    const custom = ai.provider === "custom";
+    return {
+      url: custom ? `${(ai.baseUrl as string).replace(/\/+$/, "")}/chat/completions` : "https://api.openai.com/v1/chat/completions",
+      init: {
+        method: "POST",
+        headers: { "content-type": "application/json", ...(ai.apiKey ? { authorization: `Bearer ${ai.apiKey}` } : {}) },
         body: JSON.stringify({
           model: ai.model,
           messages: [{ role: "system", content: o.system }, ...o.messages],
-          max_completion_tokens: maxTokens,
+          // OpenAI renamed max_tokens; third-party OpenAI-compatible servers still expect the classic name.
+          ...(custom ? { max_tokens: maxTokens } : { max_completion_tokens: maxTokens }),
           stream,
           ...(o.json ? { response_format: { type: "json_object" } } : {})
         }),
@@ -41,12 +67,15 @@ function request(ai: AiConfig & { provider: "openai" | "anthropic"; apiKey: stri
     url: "https://api.anthropic.com/v1/messages",
     init: {
       method: "POST",
-      headers: { "content-type": "application/json", "x-api-key": ai.apiKey, "anthropic-version": "2023-06-01" },
+      headers: { "content-type": "application/json", "x-api-key": ai.apiKey as string, "anthropic-version": "2023-06-01" },
       body: JSON.stringify({ model: ai.model, system: o.system, messages: o.messages, max_tokens: maxTokens, stream }),
       signal
     }
   };
 }
+
+/** Custom endpoints may be user-supplied: never follow redirects (they could point at internal hosts). */
+const safeInit = (ai: ReadyAi, init: RequestInit): RequestInit => (ai.provider === "custom" ? { ...init, redirect: "error" } : init);
 
 async function fail(res: Response): Promise<never> {
   let detail = "";
@@ -65,22 +94,23 @@ async function fail(res: Response): Promise<never> {
 export async function complete(ai: AiConfig, o: CompleteOptions): Promise<string> {
   if (!hasAi(ai)) throw new AiError("לא הוגדר מפתח AI", 400);
   const { url, init } = request(ai, o, false);
-  const res = await fetch(url, init);
+  const res = await fetch(url, safeInit(ai, init));
   if (!res.ok) await fail(res);
   const data = (await res.json()) as {
     choices?: Array<{ message?: { content?: string } }>;
     content?: Array<{ type: string; text?: string }>;
+    candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
   };
-  return ai.provider === "openai"
-    ? (data.choices?.[0]?.message?.content ?? "")
-    : (data.content ?? []).filter((c) => c.type === "text").map((c) => c.text ?? "").join("");
+  if (ai.provider === "gemini") return (data.candidates?.[0]?.content?.parts ?? []).map((p) => p.text ?? "").join("");
+  if (ai.provider === "anthropic") return (data.content ?? []).filter((c) => c.type === "text").map((c) => c.text ?? "").join("");
+  return data.choices?.[0]?.message?.content ?? "";
 }
 
 /** Streams text deltas (SSE) from either provider. */
 export async function* streamCompletion(ai: AiConfig, o: CompleteOptions): AsyncGenerator<string> {
   if (!hasAi(ai)) throw new AiError("לא הוגדר מפתח AI", 400);
   const { url, init } = request(ai, o, true);
-  const res = await fetch(url, init);
+  const res = await fetch(url, safeInit(ai, init));
   if (!res.ok) await fail(res);
   if (!res.body) throw new AiError("תגובה ריקה מספק ה-AI", 502);
   const reader = res.body.getReader();
@@ -102,8 +132,14 @@ export async function* streamCompletion(ai: AiConfig, o: CompleteOptions): Async
           choices?: Array<{ delta?: { content?: string } }>;
           type?: string;
           delta?: { type?: string; text?: string };
+          candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
         };
-        const text = ai.provider === "openai" ? evt.choices?.[0]?.delta?.content : evt.type === "content_block_delta" && evt.delta?.type === "text_delta" ? evt.delta.text : undefined;
+        const text =
+          ai.provider === "gemini"
+            ? (evt.candidates?.[0]?.content?.parts ?? []).map((p) => p.text ?? "").join("")
+            : ai.provider === "anthropic"
+              ? evt.type === "content_block_delta" && evt.delta?.type === "text_delta" ? evt.delta.text : undefined
+              : evt.choices?.[0]?.delta?.content;
         if (text) yield text;
       } catch {
         /* ignore keep-alives / partial frames */

@@ -1,11 +1,18 @@
-import { KEY_HEADERS, sanitizeUserKeys, type AiProviderId, type SportsProviderId, type UserKeys } from "@/lib/keys";
+import { KEY_HEADERS, safePublicHttpsUrl, sanitizeUserKeys, type AiProviderId, type SportsProviderId, type UserKeys } from "@/lib/keys";
 import { decryptJson } from "./secrets";
 import type { UserRecord } from "@/lib/data/repo";
 
 export type CredentialSource = "user" | "account" | "env" | "none";
 
 export type Credentials = {
-  ai: { provider: AiProviderId | null; apiKey: string | null; model: string; source: CredentialSource };
+  ai: {
+    provider: AiProviderId | null;
+    apiKey: string | null;
+    model: string;
+    /** Only for provider "custom": OpenAI-compatible base URL. */
+    baseUrl: string | null;
+    source: CredentialSource;
+  };
   sports: {
     provider: SportsProviderId;
     apiFootballKey: string | null;
@@ -15,9 +22,17 @@ export type Credentials = {
   };
 };
 
-const DEFAULT_MODELS: Record<AiProviderId, string> = {
-  openai: process.env.OPENAI_MODEL || "gpt-4o-mini",
-  anthropic: process.env.ANTHROPIC_MODEL || "claude-haiku-5-5"
+const defaultModel = (p: AiProviderId): string => {
+  switch (p) {
+    case "openai":
+      return process.env.OPENAI_MODEL || "gpt-4o-mini";
+    case "anthropic":
+      return process.env.ANTHROPIC_MODEL || "claude-haiku-5-5";
+    case "gemini":
+      return process.env.GEMINI_MODEL || "gemini-2.5-flash";
+    default:
+      return process.env.CUSTOM_AI_MODEL || "default";
+  }
 };
 
 type HeaderReader = { get(name: string): string | null };
@@ -46,55 +61,50 @@ export function resolveCredentials(opts: { requestKeys?: UserKeys; accountKeys?:
   const pick = <K extends keyof UserKeys>(k: K): { value: UserKeys[K] | undefined; from: CredentialSource } =>
     req[k] ? { value: req[k], from: "user" } : acc[k] ? { value: acc[k], from: "account" } : { value: undefined, from: "none" };
 
+  const env = (name: string) => process.env[name]?.trim() || undefined;
+  const from = (picked: { value: unknown; from: CredentialSource }, envValue: string | undefined): CredentialSource => (picked.value ? picked.from : envValue ? "env" : "none");
+
   const openai = pick("openaiKey");
   const anthropic = pick("anthropicKey");
-  const envOpenai = process.env.OPENAI_API_KEY;
-  const envAnthropic = process.env.ANTHROPIC_API_KEY;
+  const gemini = pick("geminiKey");
+  const customUrl = pick("customBaseUrl");
+  const customKey = pick("customKey");
+  const envCustomUrl = safePublicHttpsUrl(env("CUSTOM_AI_BASE_URL")) ?? env("CUSTOM_AI_BASE_URL")?.replace(/\/+$/, "");
 
-  const keys: Record<AiProviderId, { key: string | null; from: CredentialSource }> = {
-    openai: { key: openai.value ?? envOpenai ?? null, from: openai.value ? openai.from : envOpenai ? "env" : "none" },
-    anthropic: { key: anthropic.value ?? envAnthropic ?? null, from: anthropic.value ? anthropic.from : envAnthropic ? "env" : "none" }
+  // A provider is usable when it has a key (custom: a base URL; its key is optional for local/keyless gateways).
+  const usable: Record<AiProviderId, { ready: boolean; key: string | null; from: CredentialSource }> = {
+    openai: { ready: Boolean(openai.value ?? env("OPENAI_API_KEY")), key: openai.value ?? env("OPENAI_API_KEY") ?? null, from: from(openai, env("OPENAI_API_KEY")) },
+    anthropic: { ready: Boolean(anthropic.value ?? env("ANTHROPIC_API_KEY")), key: anthropic.value ?? env("ANTHROPIC_API_KEY") ?? null, from: from(anthropic, env("ANTHROPIC_API_KEY")) },
+    gemini: { ready: Boolean(gemini.value ?? env("GEMINI_API_KEY")), key: gemini.value ?? env("GEMINI_API_KEY") ?? null, from: from(gemini, env("GEMINI_API_KEY")) },
+    custom: { ready: Boolean(customUrl.value ?? envCustomUrl), key: customKey.value ?? env("CUSTOM_AI_API_KEY") ?? null, from: customUrl.value ? customUrl.from : envCustomUrl ? "env" : "none" }
   };
 
   const userProvider = pick("aiProvider").value;
-  const envProvider = process.env.AI_PROVIDER === "anthropic" || process.env.AI_PROVIDER === "openai" ? process.env.AI_PROVIDER : undefined;
-  const order: AiProviderId[] = [userProvider, envProvider, "openai", "anthropic"].filter((p, i, a): p is AiProviderId => Boolean(p) && a.indexOf(p) === i);
-  const provider = order.find((p) => keys[p].key) ?? null;
-  const model = pick("aiModel").value ?? (provider ? DEFAULT_MODELS[provider] : DEFAULT_MODELS.openai);
+  const envProvider = (["openai", "anthropic", "gemini", "custom"] as const).find((p) => p === env("AI_PROVIDER"));
+  const order = [userProvider, envProvider, "gemini", "openai", "anthropic", "custom"].filter((p, i, a): p is AiProviderId => Boolean(p) && a.indexOf(p) === i);
+  const provider = order.find((p) => usable[p].ready) ?? null;
+  const model = provider === "custom" ? (pick("customModel").value ?? pick("aiModel").value ?? defaultModel("custom")) : (pick("aiModel").value ?? (provider ? defaultModel(provider) : defaultModel("openai")));
 
   const football = pick("apiFootballKey");
   const basketball = pick("apiBasketballKey");
   const monks = pick("sportmonksToken");
-  const envFootball = process.env.API_FOOTBALL_KEY;
-  const envBasketball = process.env.API_BASKETBALL_KEY || envFootball;
-  const envMonks = process.env.SPORTMONKS_TOKEN;
-  const apiFootballKey = football.value ?? envFootball ?? null;
-  const apiBasketballKey = basketball.value ?? football.value ?? envBasketball ?? null;
-  const sportmonksToken = monks.value ?? envMonks ?? null;
+  const apiFootballKey = football.value ?? env("API_FOOTBALL_KEY") ?? null;
+  const apiBasketballKey = basketball.value ?? football.value ?? env("API_BASKETBALL_KEY") ?? env("API_FOOTBALL_KEY") ?? null;
+  const sportmonksToken = monks.value ?? env("SPORTMONKS_TOKEN") ?? null;
 
-  const userSports = pick("sportsProvider").value;
-  const envSports = process.env.SPORTS_PROVIDER as SportsProviderId | undefined;
-  const wanted = userSports ?? envSports;
-  let sportsProvider: SportsProviderId = "mock";
-  if (wanted === "mock") sportsProvider = "mock";
-  else if (wanted === "sportmonks" && sportmonksToken) sportsProvider = "sportmonks";
-  else if (wanted === "api-football" && apiFootballKey) sportsProvider = "api-football";
-  else if (!wanted) sportsProvider = apiFootballKey ? "api-football" : sportmonksToken ? "sportmonks" : "mock";
-
-  const sportsSource: CredentialSource =
-    sportsProvider === "mock"
-      ? "none"
-      : sportsProvider === "sportmonks"
-        ? monks.value
-          ? monks.from
-          : "env"
-        : football.value || basketball.value
-          ? (football.value ? football.from : basketball.from)
-          : "env";
+  /**
+   * Live data needs NO subscription: the default "auto" chain uses free public JSON (ESPN) and falls back to scraping the
+   * Israeli portals. A paid key, when present, is simply tried first. Choosing "mock" disables live data entirely.
+   */
+  const wantedRaw = pick("sportsProvider").value ?? (env("SPORTS_PROVIDER") as SportsProviderId | undefined);
+  const wanted: SportsProviderId = wantedRaw ?? "auto";
+  let sportsProvider: SportsProviderId = wanted;
+  if (wanted === "api-football" && !apiFootballKey) sportsProvider = "auto";
+  if (wanted === "sportmonks" && !sportmonksToken) sportsProvider = "auto";
+  const paidSource: CredentialSource = apiFootballKey || sportmonksToken ? (football.value || basketball.value ? football.from : monks.value ? monks.from : "env") : "none";
 
   return {
-    ai: { provider, apiKey: provider ? keys[provider].key : null, model, source: provider ? keys[provider].from : "none" },
-    sports: { provider: sportsProvider, apiFootballKey, apiBasketballKey, sportmonksToken, source: sportsSource }
+    ai: { provider, apiKey: provider ? usable[provider].key : null, model, baseUrl: provider === "custom" ? ((customUrl.value ?? envCustomUrl) as string).replace(/\/+$/, "") : null, source: provider ? usable[provider].from : "none" },
+    sports: { provider: sportsProvider, apiFootballKey, apiBasketballKey, sportmonksToken, source: paidSource }
   };
 }
-

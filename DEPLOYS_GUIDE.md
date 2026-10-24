@@ -27,10 +27,10 @@ The codebase was generated in a single session, validated, and pushed to
 | `DATABASE_URL` | yes (production) | Neon connection string. Without it the app still runs on an in-memory store (no persistence, no accounts across instances). |
 | `AUTH_SECRET` | recommended | 32+ random chars (`openssl rand -hex 32`). Signs session cookies and encrypts API keys synced to accounts. Falls back to a value derived from `DATABASE_URL`. |
 | `CRON_SECRET` | recommended | Vercel sends it as `Authorization: Bearer …` to cron routes; requests without it are rejected. |
-| `AI_PROVIDER`, `OPENAI_API_KEY`, `OPENAI_MODEL`, `ANTHROPIC_API_KEY`, `ANTHROPIC_MODEL` | optional | System AI fallback (anti-clickbait titles, vibe, digest, analyst). Without any key the app uses deterministic, data-driven fallbacks. |
-| `SPORTS_PROVIDER`, `API_FOOTBALL_KEY`, `API_BASKETBALL_KEY`, `SPORTMONKS_TOKEN` | optional but needed for scores | Live fixtures, results, standings, lineups, events. **Without a provider the Match Center shows only opening tables (0 games) – nothing is invented.** |
+| `AI_PROVIDER` (`openai` \| `anthropic` \| `gemini` \| `custom`), `GEMINI_API_KEY`, `GEMINI_MODEL`, `OPENAI_API_KEY`, `OPENAI_MODEL`, `ANTHROPIC_API_KEY`, `ANTHROPIC_MODEL`, `CUSTOM_AI_BASE_URL`, `CUSTOM_AI_API_KEY`, `CUSTOM_AI_MODEL` | optional | System AI fallback (anti-clickbait titles, vibe, digest, analyst). With several keys the order is: `AI_PROVIDER`, then Gemini, OpenAI, Anthropic, custom. Without any key the app uses deterministic, data-driven fallbacks. `CUSTOM_AI_BASE_URL` is any OpenAI-compatible server (Ollama, vLLM, OpenRouter, Groq…). |
+| `SPORTS_PROVIDER` (`auto` default \| `espn` \| `portals` \| `api-football` \| `sportmonks` \| `mock`), `API_FOOTBALL_KEY`, `API_BASKETBALL_KEY`, `SPORTMONKS_TOKEN` | **not needed** | Live data works with **no key**: see section 5. Paid keys are optional and, when present, are tried first. `mock` disables live data. |
 | `FEED_URL_SPORT5`, `FEED_URL_ONE`, `FEED_URL_SPORT1`, `FEED_URL_YNET`, `FEED_URL_WALLA` | optional | Override an RSS endpoint if a portal moves its feed. |
-| `SKIP_DB_SEED`, `SKIP_INGEST_ON_BUILD` | optional | Skip the first-deploy seed / first news pull. |
+| `SKIP_DB_SEED`, `SKIP_INGEST_ON_BUILD`, `DISABLE_LAZY_REFRESH` | optional | Skip the first-deploy seed / first news pull / the refresh-on-visit cycle. |
 
 ## 3. Environment variables vs. Settings-page API keys
 
@@ -59,16 +59,39 @@ If `DATABASE_URL` is missing the step is skipped. Manual commands: `npm run db:m
 * Club lists are the last verified top-flight rosters; promotion/relegation is reconciled when the provider sync runs.
 * **No fabricated fixtures, results, player names or articles are seeded.** Real data arrives through the pipelines below.
 
-## 5. Background jobs (`vercel.json`)
+## 5. Data pipelines: news, scores, fixtures, tables
 
-| Route | Schedule | Work |
+### News (Sport5, ONE, Sport1, Ynet Sport, Walla Sport)
+
+Each cycle: RSS feed (HTML section-page fallback) → dedupe by canonical URL → full-text extraction with Cheerio (ads, banners, popups, affiliate/betting promos, widgets and scripts removed; plain text only) → team/category detection → **story clustering into master threads** (same team, 36 h window, headline overlap) → anti-clickbait neutral titles + TL;DR → vibe score.
+
+### Live scores, fixtures and standings – no subscription required
+
+The default `auto` chain, in order:
+
+1. a paid provider (API-Football / Sportmonks) **only if** you supplied a key;
+2. **ESPN public JSON** (free, key-less, unofficial): English Premier League, La Liga, Champions League, NBA;
+3. **Israeli portal scraping** (automatic fallback): the five portals' home pages are crawled, their "table / results / fixtures" links are discovered, and the parsers recognise league tables and match rows from the *content* (club names + played/W/D/L/goals/points, scores, minutes, kick-off times) rather than CSS selectors. Results are validated (played = W+D+L, one league per table) before they are stored. This covers the Israeli Premier League, Liga Leumit and Winner League, plus anything the portals publish for other leagues.
+
+Scraped data has no lineups, per-match statistics or event timelines (those need a provider); the match page shows empty states instead of inventing them. Fixtures/tables refresh at most every 15–20 minutes per league; live scores whenever a match is active.
+
+> Honest limits: the portal parsers and ESPN mappings are covered by unit tests on representative HTML/JSON, but the build environment could not reach those sites. If a portal changes its structure or hides tables behind JavaScript rendering, that source silently yields nothing and the next one is used; check `GET /api/cron/ingest` (per-source errors in the JSON) after deploying.
+
+### How often it runs (3 layers)
+
+| Layer | Frequency | Notes |
 | --- | --- | --- |
-| `/api/cron/ingest` | every 5 minutes | RSS (HTML-listing fallback) → full-text extraction with ad stripping → team/category detection → story clustering → anti-clickbait titles + TL;DR → vibe score; then provider sync (fixtures/standings every 6 h per league, live scores only when a match is active). |
-| `/api/cron/digest?slot=summer` and `slot=winter` | 04:00 and 05:00 UTC | Cron is UTC-only; the route runs only when the Israel-local hour is 07, so exactly one of the two fires, all year (daylight saving safe). |
+| Vercel Cron `/api/cron/ingest` | daily 00:00 UTC | Hobby plan limit. Digest cron: 04:00 and 05:00 UTC (only the one at 07:00 Israel time does work, so DST is handled). |
+| GitHub Actions `.github/workflows/scheduled-refresh.yml` | **every 5 minutes**, free | Add repository secrets `APP_URL` (e.g. `https://your-app.vercel.app`) and `CRON_SECRET` (same value as the Vercel variable). Without `APP_URL` the workflow does nothing. GitHub may delay scheduled runs by a few minutes under load. |
+| Refresh on visit | whenever the latest run is > 5 min old | The first request after that window schedules a background cycle (`after()`), so data stays fresh while anyone uses the app, with no extra setup. |
 
-**Plan note:** Vercel Hobby allows only daily crons, so `*/5` requires Pro. On Hobby, change the ingest schedule to daily or call `GET /api/cron/ingest` every 5 minutes from an external scheduler (add header `Authorization: Bearer $CRON_SECRET`).
+On a Pro plan you can set the ingest cron in `vercel.json` back to `*/5 * * * *`.
 
-Scraping notes: the user-agent identifies the bot, requests have timeouts/size caps, extraction output is plain text only, and every article shows a source badge with a canonical link. Check each portal's terms of use and robots.txt before enabling full-text republishing; reduce to summaries if required. Puppeteer is intentionally not used (headless Chromium does not fit serverless limits); Cheerio handles server-rendered article pages.
+Scraping notes: the user-agent identifies the bot, requests have timeouts/size caps, extraction output is plain text only, and every article shows a source badge with a canonical link. Check each portal's terms of use and robots.txt before enabling full-text republishing or score scraping in production. Puppeteer is intentionally not used (headless Chromium does not fit serverless limits).
+
+### AI providers
+
+Gemini, OpenAI, Anthropic and any OpenAI-compatible endpoint are first-class. Gemini 1.5 models have been retired by Google, so the defaults are `gemini-2.5-flash` / `-pro`; any model id can be typed in Settings. User-supplied custom endpoints must be public HTTPS (localhost, private IPs and redirects are refused to prevent SSRF); the operator-controlled `CUSTOM_AI_BASE_URL` variable may point anywhere.
 
 ## 6. Local development
 

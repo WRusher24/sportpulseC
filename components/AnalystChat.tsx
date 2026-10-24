@@ -75,7 +75,7 @@ export function AnalystChat({ favoriteTeamId, favoriteTeamName }: { favoriteTeam
     }
   };
 
-  const aiLabel = status?.ai.provider ? `AI פעיל · ${status.ai.provider === "openai" ? "OpenAI" : "Anthropic"} · ${SOURCE_HE[status.ai.source] ?? ""}` : "מצב ניתוח נתונים (ללא מפתח AI)";
+  const aiLabel = status?.ai.provider ? `AI פעיל · ${({ openai: "OpenAI", anthropic: "Anthropic", gemini: "Google Gemini", custom: "Custom" } as Record<string, string>)[status.ai.provider] ?? status.ai.provider} · ${SOURCE_HE[status.ai.source] ?? ""}` : "מצב ניתוח נתונים (ללא מפתח AI)";
 
   return (
     <section aria-label="צ'אט עם האנליסט" className="flex flex-col">

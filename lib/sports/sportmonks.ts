@@ -43,6 +43,12 @@ const utc = (s: string) => new Date(s.replace(" ", "T") + (s.endsWith("Z") ? "" 
 
 export class SportmonksProvider implements SportsProvider {
   readonly id = "sportmonks" as const;
+  readonly liveDirect = true;
+  readonly refreshMs = 6 * 3_600_000;
+
+  supports(league: LeagueDTO) {
+    return Boolean(league.sportmonksId);
+  }
 
   constructor(private readonly token: string) {}
 

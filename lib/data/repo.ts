@@ -107,6 +107,7 @@ export interface Repo {
   updateArticleAI(id: string, patch: { neutralTitle: string; summary: string | null; clickbaitScore: number }): Promise<void>;
   threadsNeedingVibe(limit: number): Promise<ThreadDTO[]>;
   setThreadVibe(threadId: string, optimistic: number, worried: number): Promise<void>;
+  lastIngestAt(): Promise<Date | null>;
   logIngestRun(r: { startedAt: Date; fetched: number; inserted: number; report: Record<string, unknown> }): Promise<void>;
 
   /* ---- match data sync ---- */

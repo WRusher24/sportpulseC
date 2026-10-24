@@ -12,7 +12,11 @@ import { resolveCredentials } from "../lib/server/credentials";
 import { decryptJson, encryptJson, hashPassword, verifyPassword } from "../lib/server/secrets";
 import { signSession, verifySession } from "../lib/server/session-token";
 import { simulateSeason } from "../lib/analytics/season";
-import { sanitizeUserKeys } from "../lib/keys";
+import { sanitizeUserKeys, safePublicHttpsUrl } from "../lib/keys";
+import { mapEspnEvent, mapEspnStandings } from "../lib/sports/espn";
+import { ChainProvider } from "../lib/sports/chain";
+import { makeScrapeContext, parseResults, parseStandingsTables, discoverScoreLinks, israelLocalToUtc } from "../lib/sports/portal-parse";
+import type { SportsProvider } from "../lib/sports/types";
 
 const baseline = buildBaseline(new Date("2026-10-24T08:00:00Z"));
 
@@ -143,6 +147,8 @@ test("credential precedence: browser keys > account keys > environment", () => {
   process.env.SPORTMONKS_TOKEN = "";
   process.env.SPORTS_PROVIDER = "";
   process.env.AI_PROVIDER = "";
+  process.env.GEMINI_API_KEY = "";
+  process.env.CUSTOM_AI_BASE_URL = "";
   try {
     assert.deepEqual([resolveCredentials().ai.source, resolveCredentials().ai.apiKey], ["env", "env-openai-key-1234"]);
     assert.equal(resolveCredentials({ accountKeys: { openaiKey: "account-key-12345" } }).ai.apiKey, "account-key-12345");
@@ -150,8 +156,11 @@ test("credential precedence: browser keys > account keys > environment", () => {
     assert.deepEqual([user.ai.apiKey, user.ai.source], ["browser-key-12345", "user"]);
     const claude = resolveCredentials({ requestKeys: { anthropicKey: "sk-ant-browser-123", aiProvider: "anthropic" } });
     assert.equal(claude.ai.provider, "anthropic");
-    assert.equal(resolveCredentials().sports.provider, "mock");
-    assert.equal(resolveCredentials({ requestKeys: { apiFootballKey: "football-key-1234" } }).sports.provider, "api-football");
+    assert.equal(resolveCredentials().sports.provider, "auto");
+    assert.equal(resolveCredentials().sports.source, "none");
+    assert.equal(resolveCredentials({ requestKeys: { apiFootballKey: "football-key-1234" } }).sports.source, "user");
+    assert.equal(resolveCredentials({ requestKeys: { sportsProvider: "api-football" } }).sports.provider, "auto"); // no key: free chain
+    assert.equal(resolveCredentials({ requestKeys: { sportsProvider: "portals" } }).sports.provider, "portals");
     assert.equal(resolveCredentials({ requestKeys: { sportsProvider: "mock", apiFootballKey: "football-key-1234" } }).sports.provider, "mock");
   } finally {
     Object.assign(process.env, save);
@@ -182,4 +191,86 @@ test("season simulation: probabilities are coherent and favour the leader", () =
   const sims = simulateSeason(table, { totalGames: 26, sport: "football", runs: 600 });
   for (const d of sims) assert.ok(Math.abs(d.positions.reduce((a, b) => a + b, 0) - 1) < 1e-9);
   assert.ok(sims[0].expectedPosition < sims.at(-1)!.expectedPosition);
+});
+
+test("Gemini and custom OpenAI-compatible providers resolve with the right precedence", () => {
+  const save = { ...process.env };
+  for (const k of ["OPENAI_API_KEY", "ANTHROPIC_API_KEY", "GEMINI_API_KEY", "AI_PROVIDER", "CUSTOM_AI_BASE_URL", "CUSTOM_AI_API_KEY"]) process.env[k] = "";
+  try {
+    assert.equal(resolveCredentials().ai.provider, null);
+    process.env.GEMINI_API_KEY = "env-gemini-key-1234";
+    assert.deepEqual([resolveCredentials().ai.provider, resolveCredentials().ai.source, resolveCredentials().ai.model], ["gemini", "env", "gemini-2.5-flash"]);
+    const picked = resolveCredentials({ requestKeys: { aiProvider: "openai", openaiKey: "browser-openai-1234", geminiKey: "browser-gemini-1234" } });
+    assert.deepEqual([picked.ai.provider, picked.ai.apiKey], ["openai", "browser-openai-1234"]);
+    const custom = resolveCredentials({ requestKeys: { aiProvider: "custom", customBaseUrl: "https://llm.example.com/v1/", customModel: "llama3.1:8b" } });
+    assert.deepEqual([custom.ai.provider, custom.ai.baseUrl, custom.ai.model, custom.ai.apiKey], ["custom", "https://llm.example.com/v1", "llama3.1:8b", null]);
+    assert.equal(resolveCredentials({ requestKeys: { customBaseUrl: "http://localhost:11434/v1" } }).ai.provider, "gemini"); // unsafe URL dropped
+  } finally {
+    Object.assign(process.env, save);
+  }
+});
+
+test("SSRF guard accepts only public https endpoints", () => {
+  assert.equal(safePublicHttpsUrl("https://api.groq.com/openai/v1/"), "https://api.groq.com/openai/v1");
+  for (const bad of ["http://api.example.com/v1", "https://localhost/v1", "https://127.0.0.1/v1", "https://10.0.0.5/v1", "https://192.168.1.2/v1", "https://169.254.169.254/latest", "https://[::1]/v1", "https://user:pw@example.com/v1", "https://intranet/v1", "https://box.local/v1", "ftp://example.com", "not a url"]) assert.equal(safePublicHttpsUrl(bad), null, bad);
+});
+
+test("ESPN mapping: statuses, scores, minutes and standings", () => {
+  const ev = (state: string, name: string, period: number, clock: string, hs: string, as: string) => ({ id: "1", date: "2026-10-24T14:00Z", competitions: [{ competitors: [{ homeAway: "home" as const, score: hs, team: { displayName: "Arsenal" } }, { homeAway: "away" as const, score: as, team: { displayName: "Chelsea" } }], status: { displayClock: clock, period, type: { name, state } } }] });
+  assert.equal(mapEspnEvent(ev("pre", "STATUS_SCHEDULED", 0, "0'", "0", "0"), "epl", false)?.homeScore, null);
+  const live = mapEspnEvent(ev("in", "STATUS_SECOND_HALF", 2, "67'", "2", "1"), "epl", false)!;
+  assert.deepEqual([live.status, live.minute, live.homeScore, live.awayScore, live.leagueId], ["second_half", 67, 2, 1, "epl"]);
+  assert.equal(mapEspnEvent(ev("post", "STATUS_FULL_TIME", 2, "90'", "3", "0"), "epl", false)?.status, "finished");
+  assert.equal(mapEspnEvent(ev("in", "STATUS_HALFTIME", 1, "45'", "0", "0"), "epl", false)?.status, "half_time");
+  const table = mapEspnStandings({ children: [{ standings: { entries: [{ team: { displayName: "Arsenal" }, stats: [{ name: "gamesPlayed", value: 9 }, { name: "wins", value: 7 }, { name: "ties", value: 1 }, { name: "losses", value: 1 }, { name: "pointsFor", value: 20 }, { name: "pointsAgainst", value: 5 }, { name: "points", value: 22 }] }] } }] }, false);
+  assert.deepEqual([table[0].played, table[0].points, table[0].goalsFor], [9, 22, 20]);
+});
+
+const T = (id: string) => TEAM_SEEDS.find((t) => t.id === id)!.nameHe;
+const premier = TEAM_SEEDS.filter((t) => t.leagueId === "il-premier");
+const ctx = makeScrapeContext(baseline.teams, baseline.leagues);
+
+test("portal scraper: league table is recognised from content, not selectors", () => {
+  const rows = premier.slice(0, 8).map((t, i) => `<tr><td>${i + 1}</td><td><a>${t.nameHe}</a></td><td>10</td><td>${8 - i}</td><td>1</td><td>${1 + i}</td><td>${20 - i}:${5 + i}</td><td>${25 - 3 * i}</td></tr>`).join("");
+  const html = `<html><body><table><tr><th>#</th><th>קבוצה</th><th>מש'</th><th>נצ'</th><th>ת'</th><th>הפ'</th><th>שערים</th><th>נק'</th></tr>${rows}</table><table><tr><td>x</td><td>y</td></tr></table></body></html>`;
+  const tables = parseStandingsTables(html, ctx);
+  assert.equal(tables.length, 1);
+  assert.equal(tables[0].leagueId, "il-premier");
+  assert.equal(tables[0].rows.length, 8);
+  assert.deepEqual([tables[0].rows[0].played, tables[0].rows[0].wins, tables[0].rows[0].goalsFor, tables[0].rows[0].points], [10, 8, 20, 25]);
+  // arithmetic that does not add up (played != W+D+L) is rejected
+  assert.equal(parseStandingsTables(html.replace(/<td>10<\/td>/g, "<td>11</td>"), ctx).length, 0);
+});
+
+test("portal scraper: finished, live and upcoming matches", () => {
+  const now = new Date("2026-10-24T13:00:00Z");
+  const html = `<html><head><title>תוצאות ליגת העל</title></head><body><ul>
+    <li class="g">${T("maccabi-haifa")} 2 - 1 ${T("hapoel-beer-sheva")} סיום</li>
+    <li class="g">${T("beitar-jerusalem")} 0:1 ${T("maccabi-netanya")} 67'</li>
+    <li class="g">24.10 ${T("hapoel-tel-aviv-fc")} ${T("bnei-sakhnin")} 20:30</li>
+    <li class="g">מכבי נתניה בלי יריב כאן</li></ul></body></html>`;
+  const m = parseResults(html, ctx, now);
+  const by = (home: string) => m.find((x) => x.homeName === T(home))!;
+  assert.equal(m.length, 3);
+  assert.deepEqual([by("maccabi-haifa").status, by("maccabi-haifa").homeScore, by("maccabi-haifa").awayScore, by("maccabi-haifa").leagueId], ["finished", 2, 1, "il-premier"]);
+  assert.deepEqual([by("beitar-jerusalem").status, by("beitar-jerusalem").minute, by("beitar-jerusalem").awayScore], ["second_half", 67, 1]);
+  assert.deepEqual([by("hapoel-tel-aviv-fc").status, by("hapoel-tel-aviv-fc").homeScore, by("hapoel-tel-aviv-fc").kickoff], ["scheduled", null, "2026-10-24T17:30:00.000Z"]);
+});
+
+test("Israel local time converts to UTC across DST", () => {
+  assert.equal(israelLocalToUtc(2026, 10, 24, 20, 30).toISOString(), "2026-10-24T17:30:00.000Z"); // IDT (+3)
+  assert.equal(israelLocalToUtc(2026, 12, 5, 20, 30).toISOString(), "2026-12-05T18:30:00.000Z"); // IST (+2)
+});
+
+test("portal link discovery finds table/results pages on the same site only", () => {
+  const html = `<a href="/liga/table">טבלת ליגת העל</a><a href="https://evil.example.com/x">תוצאות</a><a href="/news/1">כתבה ארוכה על משהו אחר לגמרי</a><a href="/results">תוצאות</a>`;
+  assert.deepEqual(discoverScoreLinks(html, "https://www.sport5.co.il/"), ["https://www.sport5.co.il/liga/table", "https://www.sport5.co.il/results"]);
+});
+
+test("provider chain falls through failures and empty answers", async () => {
+  const mk = (id: string, fixtures: () => Promise<any[]>): SportsProvider => ({ id: id as never, liveDirect: false, refreshMs: 1000, supports: () => true, liveMatches: async () => [], fixtures, standings: async () => [], detail: async () => null });
+  const league = baseline.leagues[0];
+  const row = { externalId: "x", leagueExternalId: null, homeName: "a", awayName: "b", homeScore: null, awayScore: null, status: "scheduled" as const, minute: null, kickoff: "2026-10-24T10:00:00Z", venue: null, round: null };
+  const chain = new ChainProvider([mk("espn", async () => { throw new Error("down"); }), mk("portals", async () => []), mk("api-football", async () => [row])]);
+  assert.equal((await chain.fixtures(league, "2026-10-24", "2026-10-25")).length, 1);
 });

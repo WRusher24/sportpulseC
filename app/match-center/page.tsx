@@ -6,7 +6,7 @@ import { getRepo } from "@/lib/data";
 import { fmtDate, fmtShortDate, israelDayKey } from "@/lib/format";
 import { getFavoriteTeamId } from "@/lib/server/session";
 import { systemCredentials } from "@/lib/server/request-credentials";
-import { getProvider } from "@/lib/sports";
+import { providerFor } from "@/lib/sports/factory";
 import { liveTicker } from "@/lib/sports/sync";
 import type { LeagueDTO, MatchDTO, TeamDTO } from "@/lib/types";
 
@@ -21,7 +21,7 @@ export default async function MatchCenterPage({ searchParams }: { searchParams: 
   const tab = sp.tab === "tables" ? "tables" : "fixtures";
   const [leagues, teamList, favorite] = await Promise.all([repo.listLeagues(), repo.listTeams(), getFavoriteTeamId()]);
   const teams = new Map(teamList.map((t) => [t.id, t]));
-  const ticker = await liveTicker(repo, getProvider(systemCredentials().sports));
+  const ticker = await providerFor(repo, systemCredentials().sports).then((p) => liveTicker(repo, p));
   const leagueId = leagues.some((l) => l.id === sp.league) ? sp.league : undefined;
 
   const href = (patch: Record<string, string | undefined>) => {

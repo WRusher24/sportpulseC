@@ -14,6 +14,11 @@ export class TeamMatcher {
     }
   }
 
+  /** Every team whose name/alias equals `name` exactly (football and basketball clubs often share a Hebrew name). */
+  findAll(name: string): TeamDTO[] {
+    return this.exact.get(normalize(name)) ?? [];
+  }
+
   find(name: string, sport?: "football" | "basketball", leagueHint?: string): TeamDTO | null {
     const n = normalize(name);
     const pool = (list: TeamDTO[]) => {

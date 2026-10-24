@@ -6,7 +6,7 @@ import { getRepo } from "@/lib/data";
 import { CATEGORY_LABEL } from "@/lib/he";
 import { getFavoriteTeamId } from "@/lib/server/session";
 import { systemCredentials } from "@/lib/server/request-credentials";
-import { getProvider } from "@/lib/sports";
+import { providerFor } from "@/lib/sports/factory";
 import { liveTicker } from "@/lib/sports/sync";
 import type { ArticleCategory } from "@/lib/types";
 
@@ -24,7 +24,7 @@ export default async function FeedPage({ searchParams }: { searchParams: Promise
   const [threads, teams, ticker] = await Promise.all([
     repo.listThreads({ category, teamId: team, q, limit: PAGE }),
     repo.listTeams(),
-    liveTicker(repo, getProvider(systemCredentials().sports))
+    providerFor(repo, systemCredentials().sports).then((p) => liveTicker(repo, p))
   ]);
   const teamNames = Object.fromEntries(teams.map((t) => [t.id, t.nameHe]));
   const key = `${category ?? ""}|${team ?? ""}|${q ?? ""}`;

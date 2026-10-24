@@ -42,6 +42,12 @@ const num = (v: unknown): number => {
 
 export class ApiFootballProvider implements SportsProvider {
   readonly id = "api-football" as const;
+  readonly liveDirect = true;
+  readonly refreshMs = 6 * 3_600_000;
+
+  supports(league: LeagueDTO) {
+    return Boolean(league.apiFootballId || league.apiBasketballId);
+  }
 
   constructor(
     private readonly footballKey: string | null,

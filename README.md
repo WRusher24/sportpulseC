@@ -2,7 +2,7 @@
 
 Hebrew RTL mobile-first Israeli sports aggregator: multi-source news ingestion, AI story clustering and anti-clickbait titles, live match center, fan ratings and an AI analyst.
 
-Stack: Next.js 16 (App Router, Server Actions), Tailwind CSS 3 (logical properties), Drizzle ORM + Neon PostgreSQL, Vercel Cron, OpenAI / Anthropic via runtime-overridable keys, API-Football / Sportmonks adapters.
+Stack: Next.js 16 (App Router, Server Actions), Tailwind CSS 3 (logical properties), Drizzle ORM + Neon PostgreSQL, Vercel Cron, Gemini / OpenAI / Anthropic / custom OpenAI-compatible endpoints via runtime-overridable keys; key-less live data (ESPN public JSON + Israeli portal scraping) with optional API-Football / Sportmonks adapters.
 
 * Deploy: see [DEPLOYS_GUIDE.md](DEPLOYS_GUIDE.md)
 * Use: see [USER_GUIDE.md](USER_GUIDE.md)
